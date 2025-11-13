@@ -9,34 +9,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-
-def fraction_to_str(frac):
-    if isinstance(frac, Fraction):
-        if frac.denominator == 1:
-            return str(frac.numerator)
-        else:
-            return f"{frac.numerator}/{frac.denominator}"
-    return str(frac)
-
-class Matrix:
-    def __init__(self, data):
-        self.data = data
-        self.rows = len(data)
-        self.cols = len(data[0]) if self.rows > 0 else 0
-        self.shape = (self.rows, self.cols)
-    def __getitem__(self, indices):
-        i, j = indices
-        return self.data[i][j]
-    def __setitem__(self, indices, value):
-        i, j = indices
-        self.data[i][j] = value
+from matrix_core import Matrix, fraction_to_str, _determinant_step as core_det_step, _determinant_sarrus as core_det_sarrus
+import math_utils
+import operations_sum
+import operations_subtract
+import operations_multiply
+import operations_determinant
+import operations_cofactor
+import operations_gauss
+import root_bisection
+import root_falsepos
+from file_io import save_file_path, read_saved_json, write_saved_json, collect_entries_as_strings, fill_entries_from_strings
 
 class MatrixCalculator:
     def __init__(self, root):
         self.root = root
         self.root.title("Calculadora de Matrices Exacta")
         self.root.geometry("1200x850")
-        self.root.eval('tk::PlaceWindow . center')
+        # Maximizar ventana al iniciar (Windows compatible)
+        try:
+            self.root.state('zoomed')
+        except Exception:
+            # Fallback: center window
+            try:
+                self.root.eval('tk::PlaceWindow . center')
+            except Exception:
+                pass
         # Atajo ESC para salir de pantalla completa
         self.root.bind('<Escape>', self.toggle_fullscreen)
         self.colors = {
@@ -78,9 +76,43 @@ class MatrixCalculator:
             return False
 
     def setup_ui(self):
-        # Crear notebook para pestañas
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=20)
+        # Crear un canvas scrollable que contendrá el notebook (permite desplazar todo el formulario)
+        outer_frame = tk.Frame(self.root, bg=self.colors["background"])
+        outer_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        self.canvas = tk.Canvas(outer_frame, bg=self.colors["background"], highlightthickness=0)
+        vsb_main = tk.Scrollbar(outer_frame, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=vsb_main.set)
+        vsb_main.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        # Frame interior que contendrá el notebook
+        self.inner_frame = tk.Frame(self.canvas, bg=self.colors["background"]) 
+        self._inner_window = self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
+
+        # Ajustar scrollregion cuando cambie el tamaño del contenido
+        def _on_frame_config(event):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self.inner_frame.bind("<Configure>", _on_frame_config)
+
+        # Ajustar el ancho del contenido para que llene el canvas horizontalmente
+        def _on_canvas_config(event):
+            # actualizar el ancho del window para que coincida con el canvas
+            try:
+                self.canvas.itemconfigure(self._inner_window, width=event.width)
+            except Exception:
+                pass
+        self.canvas.bind('<Configure>', _on_canvas_config)
+
+        # Soportar scroll con rueda del ratón (Windows)
+        def _on_mousewheel(event):
+            # event.delta es múltiplo de 120 en Windows
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Crear notebook dentro del frame interior
+        self.notebook = ttk.Notebook(self.inner_frame)
+        self.notebook.pack(fill="both", expand=True)
         
         # Pestaña de Operaciones con Matrices
         self.matrix_tab = tk.Frame(self.notebook, bg=self.colors["background"])
@@ -525,40 +557,22 @@ class MatrixCalculator:
         matA = self.get_matrix(self.entriesA)
         matB = self.get_matrix(self.entriesB)
         if matA is None or matB is None: return
-        
-        rows, cols = matA.shape
-        
+        try:
+            result_matrix, log = operations_sum.add_matrices(matA, matB)
+        except Exception as e:
+            self.result_text.insert(tk.END, f"\n❌ ERROR: {e}\n", "error")
+            return
+
+        # Mostrar matrices originales y logs
         self.result_text.insert(tk.END, f"\n{'='*60}\n", "title")
         self.result_text.insert(tk.END, f"OPERACIÓN: SUMA DE MATRICES\n", "title")
         self.result_text.insert(tk.END, f"{'='*60}\n", "title")
-        
-        # Mostrar matrices originales
         self.display_matrix(matA, "Matriz A", "matrix")
         self.display_matrix(matB, "Matriz B", "matrix")
-        
-        # Verificar dimensiones
-        if matA.shape != matB.shape:
-            self.result_text.insert(tk.END, f"\n❌ ERROR: Las dimensiones no coinciden\n", "error")
-            self.result_text.insert(tk.END, f"   A: {matA.rows}×{matA.cols}, B: {matB.rows}×{matB.cols}\n", "error")
-            return
-        
-        # Calcular resultado
-        result = [[matA[i,j]+matB[i,j] for j in range(cols)] for i in range(rows)]
-        
-        # Mostrar cálculo paso a paso
-        self.result_text.insert(tk.END, f"\n🧮 CÁLCULO PASO A PASO:\n", "step")
-        
-        for i in range(rows):
-            for j in range(cols):
-                a_val = matA[i,j]
-                b_val = matB[i,j]
-                sum_val = result[i][j]
-                self.result_text.insert(tk.END, f"C[{i+1},{j+1}] = A[{i+1},{j+1}] + B[{i+1},{j+1}] = {fraction_to_str(a_val)} + {fraction_to_str(b_val)} = {fraction_to_str(sum_val)}\n", "matrix")
-        
-        # Mostrar resultado final
-        result_matrix = Matrix(result)
+        self.result_text.insert(tk.END, "\n🧮 CÁLCULO PASO A PASO:\n", "step")
+        for line in log:
+            self.result_text.insert(tk.END, line + "\n", "matrix")
         self.display_matrix(result_matrix, "Matriz Resultante C = A + B", "matrix")
-        
         self.result_text.insert(tk.END, f"\n✅ Suma completada exitosamente\n", "independent")
         self.result_text.insert(tk.END, "\n" + "="*60 + "\n")
 
@@ -566,40 +580,21 @@ class MatrixCalculator:
         matA = self.get_matrix(self.entriesA)
         matB = self.get_matrix(self.entriesB)
         if matA is None or matB is None: return
-        
-        rows, cols = matA.shape
-        
+        try:
+            result_matrix, log = operations_subtract.subtract_matrices(matA, matB)
+        except Exception as e:
+            self.result_text.insert(tk.END, f"\n❌ ERROR: {e}\n", "error")
+            return
+
         self.result_text.insert(tk.END, f"\n{'='*60}\n", "title")
         self.result_text.insert(tk.END, f"OPERACIÓN: RESTA DE MATRICES\n", "title")
         self.result_text.insert(tk.END, f"{'='*60}\n", "title")
-        
-        # Mostrar matrices originales
         self.display_matrix(matA, "Matriz A", "matrix")
         self.display_matrix(matB, "Matriz B", "matrix")
-        
-        # Verificar dimensiones
-        if matA.shape != matB.shape:
-            self.result_text.insert(tk.END, f"\n❌ ERROR: Las dimensiones no coinciden\n", "error")
-            self.result_text.insert(tk.END, f"   A: {matA.rows}×{matA.cols}, B: {matB.rows}×{matB.cols}\n", "error")
-            return
-        
-        # Calcular resultado
-        result = [[matA[i,j]-matB[i,j] for j in range(cols)] for i in range(rows)]
-        
-        # Mostrar cálculo paso a paso
-        self.result_text.insert(tk.END, f"\n🧮 CÁLCULO PASO A PASO:\n", "step")
-        
-        for i in range(rows):
-            for j in range(cols):
-                a_val = matA[i,j]
-                b_val = matB[i,j]
-                diff_val = result[i][j]
-                self.result_text.insert(tk.END, f"C[{i+1},{j+1}] = A[{i+1},{j+1}] - B[{i+1},{j+1}] = {fraction_to_str(a_val)} - {fraction_to_str(b_val)} = {fraction_to_str(diff_val)}\n", "matrix")
-        
-        # Mostrar resultado final
-        result_matrix = Matrix(result)
+        self.result_text.insert(tk.END, "\n🧮 CÁLCULO PASO A PASO:\n", "step")
+        for line in log:
+            self.result_text.insert(tk.END, line + "\n", "matrix")
         self.display_matrix(result_matrix, "Matriz Resultante C = A - B", "matrix")
-        
         self.result_text.insert(tk.END, f"\n✅ Resta completada exitosamente\n", "independent")
         self.result_text.insert(tk.END, "\n" + "="*60 + "\n")
 
@@ -607,51 +602,21 @@ class MatrixCalculator:
         matA = self.get_matrix(self.entriesA)
         matB = self.get_matrix(self.entriesB)
         if matA is None or matB is None: return
-        
-        rowsA, colsA = matA.shape
-        colsB = matB.cols
-        
+        try:
+            result_matrix, log = operations_multiply.multiply_matrices(matA, matB)
+        except Exception as e:
+            self.result_text.insert(tk.END, f"\n❌ ERROR: {e}\n", "error")
+            return
+
         self.result_text.insert(tk.END, f"\n{'='*60}\n", "title")
         self.result_text.insert(tk.END, f"OPERACIÓN: MULTIPLICACIÓN DE MATRICES\n", "title")
         self.result_text.insert(tk.END, f"{'='*60}\n", "title")
-        
-        # Mostrar matrices originales
         self.display_matrix(matA, "Matriz A", "matrix")
         self.display_matrix(matB, "Matriz B", "matrix")
-        
-        # Verificar dimensiones
-        if colsA != matB.rows:
-            self.result_text.insert(tk.END, f"\n❌ ERROR: Las dimensiones no son compatibles\n", "error")
-            self.result_text.insert(tk.END, f"   Columnas de A ({colsA}) ≠ Filas de B ({matB.rows})\n", "error")
-            return
-        
-        self.result_text.insert(tk.END, f"\n📊 Dimensiones: A ({rowsA}×{colsA}) × B ({matB.rows}×{colsB}) = Resultado ({rowsA}×{colsB})\n", "step")
-        
-        # Calcular resultado
-        result = [[sum(matA[i,k]*matB[k,j] for k in range(colsA)) for j in range(colsB)] for i in range(rowsA)]
-        
-        # Mostrar cálculo paso a paso
-        self.result_text.insert(tk.END, f"\n🧮 CÁLCULO PASO A PASO:\n", "step")
-        
-        for i in range(rowsA):
-            for j in range(colsB):
-                # Mostrar el cálculo de cada elemento
-                calc_str = f"C[{i+1},{j+1}] = "
-                terms = []
-                for k in range(colsA):
-                    terms.append(f"A[{i+1},{k+1}]×B[{k+1},{j+1}] = {fraction_to_str(matA[i,k])}×{fraction_to_str(matB[k,j])}")
-                
-                calc_str += " + ".join(terms)
-                self.result_text.insert(tk.END, f"\n{calc_str}\n", "matrix")
-                
-                # Mostrar el resultado del elemento
-                element_value = result[i][j]
-                self.result_text.insert(tk.END, f"C[{i+1},{j+1}] = {fraction_to_str(element_value)}\n", "step")
-        
-        # Mostrar resultado final
-        result_matrix = Matrix(result)
+        self.result_text.insert(tk.END, "\n📊 Dimensiones y cálculo paso a paso:\n", "step")
+        for line in log:
+            self.result_text.insert(tk.END, line + "\n", "matrix")
         self.display_matrix(result_matrix, "Matriz Resultante C = A × B", "matrix")
-        
         self.result_text.insert(tk.END, f"\n✅ Multiplicación completada exitosamente\n", "independent")
         self.result_text.insert(tk.END, "\n" + "="*60 + "\n")
 
@@ -692,31 +657,26 @@ class MatrixCalculator:
         if matA.rows != matA.cols:
             messagebox.showerror("Error", "La matriz debe ser cuadrada para calcular su determinante.")
             return
-
         n = matA.rows
         matrix = [[matA[i,j] for j in range(n)] for i in range(n)]
-        
+        try:
+            det, log = operations_determinant.determinant_with_log(matrix)
+        except Exception as e:
+            self.result_text.insert(tk.END, f"\n❌ ERROR: {e}\n", "error")
+            return
+
         self.result_text.insert(tk.END, f"\n{'='*60}\n", "title")
         self.result_text.insert(tk.END, f"OPERACIÓN: DETERMINANTE DE MATRIZ\n", "title")
         self.result_text.insert(tk.END, f"{'='*60}\n", "title")
-        
-        # Mostrar matriz original
         self.display_matrix(matA, "Matriz A", "matrix")
-        
-        self.result_text.insert(tk.END, f"\n📊 Información:\n", "step")
-        self.result_text.insert(tk.END, f"   Tamaño: {n}×{n}\n", "matrix")
-        self.result_text.insert(tk.END, f"   Método: {'Regla de Sarrus' if n == 3 else 'Reducción por filas'}\n", "matrix")
-        
-        self.result_text.insert(tk.END, f"\n🧮 CÁLCULO PASO A PASO:\n", "step")
-        
-        if n == 3:
-            det = self._determinant_sarrus(matrix)
-        else:
-            det = self._determinant_step(matrix, show_text="Matriz de entrada para el determinante:")
-        
+        for line in log:
+            self.result_text.insert(tk.END, line + "\n", "step")
         self.result_text.insert(tk.END, f"\n✅ RESULTADO FINAL:\n", "title")
         self.result_text.insert(tk.END, f"   det(A) = {fraction_to_str(det)}\n", "result")
-        self.result_text.insert(tk.END, f"   Valor decimal: {float(det):.6f}\n", "matrix")
+        try:
+            self.result_text.insert(tk.END, f"   Valor decimal: {float(det):.6f}\n", "matrix")
+        except Exception:
+            pass
         self.result_text.insert(tk.END, "\n" + "="*60 + "\n")
 
     def inverse_matrix(self):
@@ -818,9 +778,8 @@ class MatrixCalculator:
         self.result_text.insert(tk.END, f"   Número de incógnitas: {n}\n", "matrix")
         
         # Calcular determinante de A
-        detA = self._determinant_step([[matA[i,j] for j in range(matA.cols)] for i in range(matA.rows)],
-                                      show_text="Determinante de la matriz A:")
-        
+        matrix_list = [[matA[i,j] for j in range(matA.cols)] for i in range(matA.rows)]
+        detA, det_log = operations_determinant.determinant_with_log(matrix_list)
         self.result_text.insert(tk.END, f"\n🔢 CÁLCULO DE DETERMINANTES:\n", "step")
         self.result_text.insert(tk.END, f"\n📌 Determinante principal:\n", "step")
         self.result_text.insert(tk.END, f"   det(A) = {fraction_to_str(detA)}\n", "result")
@@ -870,110 +829,55 @@ class MatrixCalculator:
     def cofactor_matrix(self):
         matA = self.get_matrix(self.entriesA)
         if matA is None: return
-        if matA.rows != matA.cols:
-            messagebox.showerror("Error", "La matriz debe ser cuadrada para calcular cofactores.")
+        try:
+            cofactor_mat, log = operations_cofactor.cofactor_matrix(matA)
+        except Exception as e:
+            self.result_text.insert(tk.END, f"\n❌ ERROR: {e}\n", "error")
             return
-        
-        n = matA.rows
-        
+
         self.result_text.insert(tk.END, f"\n{'='*60}\n", "title")
         self.result_text.insert(tk.END, f"OPERACIÓN: MATRIZ DE COFACTORES\n", "title")
         self.result_text.insert(tk.END, f"{'='*60}\n", "title")
-        
-        # Mostrar matriz original
         self.display_matrix(matA, "Matriz A", "matrix")
-        
-        self.result_text.insert(tk.END, f"\n📊 Información:\n", "step")
-        self.result_text.insert(tk.END, f"   Tamaño: {n}×{n}\n", "matrix")
-        self.result_text.insert(tk.END, f"   Fórmula: Cᵢⱼ = (-1)⁽ⁱ⁺ʲ⁾ × det(Mᵢⱼ)\n", "matrix")
-        
-        cofactores = []
-        self.result_text.insert(tk.END, f"\n🧮 CÁLCULO DE COFACTORES PASO A PASO:\n", "step")
-        
-        for i in range(n):
-            row_cof = []
-            for j in range(n):
-                self.result_text.insert(tk.END, f"\n📌 Cofactor C[{i+1},{j+1}]:\n", "step")
-                
-                # Crear submatriz
-                submat = [[matA[r,c] for c in range(n) if c != j] for r in range(n) if r != i]
-                submat_matrix = Matrix(submat)
-                
-                self.result_text.insert(tk.END, f"   Submatriz M[{i+1},{j+1}] (eliminando fila {i+1}, columna {j+1}):\n", "matrix")
-                self.display_matrix(submat_matrix, f"M[{i+1},{j+1}]", "matrix")
-                
-                # Calcular determinante de submatriz
-                if n-1 == 3:
-                    det_sub = self._determinant_sarrus(submat)
-                else:
-                    det_sub = self._determinant_step(submat, show_text=f"Determinante de M[{i+1},{j+1}]:")
-                
-                # Calcular cofactor
-                sign = (-1)**(i+j)
-                cofactor = sign * det_sub
-                row_cof.append(cofactor)
-                
-                self.result_text.insert(tk.END, f"   Signo: (-1)^({i+1}+{j+1}) = (-1)^{i+j+2} = {sign}\n", "matrix")
-                self.result_text.insert(tk.END, f"   C[{i+1},{j+1}] = {sign} × {fraction_to_str(det_sub)} = {fraction_to_str(cofactor)}\n", "result")
-            
-            cofactores.append(row_cof)
-        
-        # Mostrar matriz de cofactores final
-        cofactor_matrix = Matrix(cofactores)
-        self.display_matrix(cofactor_matrix, "Matriz de Cofactores", "matrix")
-        
+        for line in log:
+            self.result_text.insert(tk.END, line + "\n", "step")
+        self.display_matrix(cofactor_mat, "Matriz de Cofactores", "matrix")
         self.result_text.insert(tk.END, f"\n✅ Cálculo de cofactores completado exitosamente\n", "independent")
-        
-        # Calcular y mostrar matriz adjunta
-        self.result_text.insert(tk.END, f"\n📌 MATRIZ ADJUNTA (transpuesta de cofactores):\n", "step")
-        adjunta = [[cofactores[j][i] for j in range(n)] for i in range(n)]
-        adjunta_matrix = Matrix(adjunta)
-        self.display_matrix(adjunta_matrix, "Matriz Adjunta", "matrix")
-        
+        adj = [[cofactor_mat.data[j][i] for j in range(cofactor_mat.rows)] for i in range(cofactor_mat.cols)]
+        self.display_matrix(Matrix(adj), "Matriz Adjunta", "matrix")
         self.result_text.insert(tk.END, "\n" + "="*60 + "\n")
 
     def _determinant_step(self, matrix, show_text=""):
         n = len(matrix)
+        # Wrapper around core determinant implementation. Preserves optional UI text output.
         mat = [row[:] for row in matrix]
         if show_text:
-            self.result_text.insert(tk.END,f"{show_text}\n")
-            for row in mat:
-                self.result_text.insert(tk.END,"  ".join(fraction_to_str(val) for val in row)+"\n")
-        det = Fraction(1)
-        for i in range(n):
-            pivot = mat[i][i]
-            if pivot == 0:
-                for k in range(i+1,n):
-                    if mat[k][i] != 0:
-                        mat[i], mat[k] = mat[k], mat[i]
-                        det *= -1
-                        pivot = mat[i][i]
-                        break
-            if pivot == 0:
-                return Fraction(0)
-            det *= pivot
-            for j in range(i+1,n):
-                factor = mat[j][i]/pivot
-                for k in range(i,n):
-                    mat[j][k] -= factor*mat[i][k]
-        return det
+            self.result_text.insert(tk.END, f"{show_text}\n")
+            for row in matrix:
+                self.result_text.insert(tk.END, "  ".join(fraction_to_str(val) for val in row) + "\n")
+        return core_det_step(matrix)
 
     def _determinant_sarrus(self, matrix):
         a,b,c = matrix[0]
-        d,e,f = matrix[1]
-        g,h,i = matrix[2]
-        self.result_text.insert(tk.END,"Cálculo del determinante por Sarrus (3x3):\n")
-        self.result_text.insert(tk.END,"Matriz:\n")
-        for row in matrix:
-            self.result_text.insert(tk.END,"  ".join(fraction_to_str(x) for x in row)+"\n")
-        sum1 = a*e*i + b*f*g + c*d*h
-        sum2 = c*e*g + b*d*i + a*f*h
-        self.result_text.insert(tk.END,f"Suma diagonales positivas: {fraction_to_str(a*e*i)} + {fraction_to_str(b*f*g)} + {fraction_to_str(c*d*h)} = {fraction_to_str(sum1)}\n")
-        self.result_text.insert(tk.END,f"Suma diagonales negativas: {fraction_to_str(c*e*g)} + {fraction_to_str(b*d*i)} + {fraction_to_str(a*f*h)} = {fraction_to_str(sum2)}\n")
-        det = sum1 - sum2
-        self.result_text.insert(tk.END,f"Determinante final: {fraction_to_str(det)}\n\n")
-        return det
+        # Keep a compact UI log then call core implementation
+        try:
+            a, b, c = matrix[0]
+            d, e, f = matrix[1]
+            g, h, i = matrix[2]
+        except Exception:
+            return core_det_sarrus(matrix)
 
+        self.result_text.insert(tk.END, "Cálculo del determinante por Sarrus (3x3):\n")
+        self.result_text.insert(tk.END, "Matriz:\n")
+        for row in matrix:
+            self.result_text.insert(tk.END, "  ".join(fraction_to_str(x) for x in row) + "\n")
+        sum1 = a * e * i + b * f * g + c * d * h
+        sum2 = c * e * g + b * d * i + a * f * h
+        self.result_text.insert(tk.END, f"Suma diagonales positivas: {fraction_to_str(a*e*i)} + {fraction_to_str(b*f*g)} + {fraction_to_str(c*d*h)} = {fraction_to_str(sum1)}\n")
+        self.result_text.insert(tk.END, f"Suma diagonales negativas: {fraction_to_str(c*e*g)} + {fraction_to_str(b*d*i)} + {fraction_to_str(a*f*h)} = {fraction_to_str(sum2)}\n")
+        det = sum1 - sum2
+        self.result_text.insert(tk.END, f"Determinante final: {fraction_to_str(det)}\n\n")
+        return core_det_sarrus(matrix)
     def display_matrix(self, matrix, title="Matriz", tag="matrix"):
         """Muestra una matriz en formato de tabla"""
         if not matrix.data:
@@ -1043,51 +947,22 @@ class MatrixCalculator:
 
     # Utilidades de guardado/carga
     def _save_file_path(self):
-        return os.path.join(os.path.dirname(__file__), "matrices_guardadas.json")
+        return save_file_path()
 
     def _read_saved(self):
-        path = self._save_file_path()
-        if not os.path.exists(path):
-            return {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
+        return read_saved_json()
 
     def _write_saved(self, data):
-        path = self._save_file_path()
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            return True
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo escribir el archivo:\n{e}")
-            return False
+        ok = write_saved_json(data)
+        if not ok:
+            messagebox.showerror("Error", "No se pudo escribir el archivo de guardado.")
+        return ok
 
     def _collect_entries_as_strings(self, entries):
-        rows = len(entries)
-        cols = len(entries[0]) if rows else 0
-        out = []
-        for i in range(rows):
-            row = []
-            for j in range(cols):
-                val = entries[i][j].get().strip()
-                row.append(val if val != "" else "0")
-            out.append(row)
-        return out
+        return collect_entries_as_strings(entries)
 
     def _fill_entries_from_strings(self, entries, data_2d):
-        rows = len(entries)
-        cols = len(entries[0]) if rows else 0
-        if rows != len(data_2d) or (rows and cols != len(data_2d[0])):
-            return False
-        for i in range(rows):
-            for j in range(cols):
-                entries[i][j].delete(0, tk.END)
-                entries[i][j].insert(0, str(data_2d[i][j]))
-        return True
+        return fill_entries_from_strings(entries, data_2d)
 
     def save_matrix_popup(self):
         # Verifica que existan entradas
@@ -1375,8 +1250,8 @@ class MatrixCalculator:
         tk.Label(result_frame, text="Proceso de solución:", font=("Segoe UI", 12, "bold"),
                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0, 8))
         
-        self.gauss_result_text = scrolledtext.ScrolledText(result_frame, width=120, height=15,
-                                                         font=("Consolas", 10),
+        self.gauss_result_text = scrolledtext.ScrolledText(result_frame, width=120, height=20,
+                                 font=("Consolas", 12),
                                                          bg=self.colors["secondary_bg"], 
                                                          fg=self.colors["text"],
                                                          insertbackground=self.colors["text"],
@@ -1786,12 +1661,7 @@ class MatrixCalculator:
 
     def _fraction_to_str(self, frac):
         """Convierte una fracción a string"""
-        if isinstance(frac, Fraction):
-            if frac.denominator == 1:
-                return str(frac.numerator)
-            else:
-                return f"{frac.numerator}/{frac.denominator}"
-        return str(frac)
+        return fraction_to_str(frac)
 
     def _print_gauss_matrix(self, matrix):
         """Imprime la matriz aumentada con formato mejorado"""
@@ -1861,11 +1731,42 @@ class MatrixCalculator:
         
         self.function_var = tk.StringVar()
         self.function_entry = tk.Entry(func_input_frame, textvariable=self.function_var,
-                                    font=("Segoe UI", 12), width=40,
-                                    bg=self.colors["entry_bg"], fg=self.colors["text"],
-                                    insertbackground=self.colors["text"], relief="flat", bd=1)
+                        font=("Segoe UI", 12), width=40,
+                        bg=self.colors["entry_bg"], fg=self.colors["text"],
+                        insertbackground=self.colors["text"], relief="flat", bd=1)
         self.function_entry.pack(side="left", padx=(0, 10))
+           # (La previsualización se crea en el marco derecho para coincidir con Falsa Posición)
+
+        # Preview + plot area container on the right (plot enlarged to occupy corner)
+        right_frame = tk.Frame(top_frame, bg=self.colors["background"]) 
+        right_frame.pack(side="right", fill="both", expand=True, padx=(10,0))
+
+           # Plot area (embedded) for the tab (top-right) - larger to cover corner
+        plot_frame = tk.Frame(right_frame, bg=self.colors["background"])
+        plot_frame.pack(fill="both", expand=True)
+        self.bis_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.bis_plot_ax = self.bis_plot_fig.add_subplot(111)
+        self.bis_plot_canvas = FigureCanvasTkAgg(self.bis_plot_fig, plot_frame)
+        self.bis_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
+
+        # Previsualización en el lateral derecho (mismo comportamiento que Falsa Posición)
+        prev_frame = tk.Frame(right_frame, bg=self.colors["secondary_bg"], relief="flat", bd=1)
+        prev_frame.pack(fill="x", pady=(0,8))
+        tk.Label(prev_frame, text="Previsualización:", font=("Segoe UI", 10, "bold"),
+             bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
+
+        self.bis_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.bis_prev_ax = self.bis_preview_fig.add_subplot(111)
+        self.bis_prev_ax.axis('off')
+        self.bis_prev_canvas = FigureCanvasTkAgg(self.bis_preview_fig, prev_frame)
+        self.bis_prev_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
+
+        # Update preview when typing
+        self.function_entry.bind('<KeyRelease>', lambda e: self.update_bisection_preview())
         
+        
+        # Inicializar preview vacío
+        self.update_bisection_preview()
         # Botón para mostrar/ocultar teclado con mejor estilo
         self.keyboard_btn = tk.Button(func_input_frame, text="🔽 Ocultar Teclado",
                                      command=self.toggle_keyboard,
@@ -1949,7 +1850,9 @@ class MatrixCalculator:
         
         # Frame para botones
         btn_frame = tk.Frame(top_frame, bg=self.colors["background"])
-        btn_frame.pack(pady=(15, 0))
+        btn_frame.pack(pady=(8, 0))
+        # Guardar referencia para posicionar el teclado centrado respecto a estos botones
+        self.bisection_btn_frame = btn_frame
         
         button_style = {
             "font": ("Segoe UI", 11, "bold"),
@@ -2000,37 +1903,44 @@ class MatrixCalculator:
         add_hover_effect(plot_btn, "#7B68EE")
         add_hover_effect(suggest_btn, "#20B2AA")
         add_hover_effect(falsepos_btn, "#FFB703")
-        
-        # Frame para resultados (crear primero para tener referencia)
-        self.bisection_result_frame = tk.Frame(main_frame, bg=self.colors["background"])
-        self.bisection_result_frame.pack(fill="both", expand=True, pady=(15, 0))
-        
-        # Frame para el teclado virtual (visible por defecto)
+
+        # Frame para el teclado virtual (visible por defecto) - lo colocamos flotando centrado
+        # dentro de `main_frame` usando place(), para situarlo a la mitad de la ventana.
         self.keyboard_frame = tk.Frame(main_frame, bg=self.colors["matrix_bg"], relief="flat", bd=1)
-        self.keyboard_frame.pack(pady=(15, 0), fill="x", padx=20, before=self.bisection_result_frame)
+        # No usamos pack aquí; colocamos el teclado centrado en la ventana
+        # Place keyboard centered below the buttons frame
+        self.keyboard_frame.place(in_=self.bisection_btn_frame, relx=0.5, rely=1.06, anchor="n")
         # El teclado estará visible por defecto
         self.keyboard_visible = True
-        
         self.setup_virtual_keyboard()
+
+        # Frame para resultados (crear después para que aparezca debajo del teclado)
+        self.bisection_result_frame = tk.Frame(main_frame, bg=self.colors["background"])
+        self.bisection_result_frame.pack(fill="both", expand=True, pady=(15, 0))
         
         tk.Label(self.bisection_result_frame, text="Resultados:", font=("Segoe UI", 14, "bold"),
                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0, 10))
         
-        # Área de resultados
-        self.bisection_result_text = scrolledtext.ScrolledText(self.bisection_result_frame, width=80, height=20,
-                                                             font=("Consolas", 10),
-                                                             bg=self.colors["secondary_bg"], 
-                                                             fg=self.colors["text"],
-                                                             insertbackground=self.colors["text"],
-                                                             relief="flat", bd=1)
-        self.bisection_result_text.pack(fill="both", expand=True)
+        # Área de resultados con scrollbar vertical explícita
+        results_container = tk.Frame(self.bisection_result_frame, bg=self.colors["background"])
+        results_container.pack(fill="both", expand=True)
+        self.bisection_result_text = tk.Text(results_container, width=100, height=28,
+                     font=("Consolas", 14),
+                             bg=self.colors["secondary_bg"], 
+                             fg=self.colors["text"],
+                             insertbackground=self.colors["text"],
+                             relief="flat", bd=1, wrap="none")
+        vsb = tk.Scrollbar(results_container, orient="vertical", command=self.bisection_result_text.yview)
+        self.bisection_result_text.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        self.bisection_result_text.pack(side="left", fill="both", expand=True)
         
         # Configurar estilos de texto
-        self.bisection_result_text.tag_configure("title", foreground=self.colors["accent"], font=("Consolas", 10, "bold"))
-        self.bisection_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 10))
-        self.bisection_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 10, "bold"))
-        self.bisection_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 11, "bold"))
-        self.bisection_result_text.tag_configure("warning", foreground="#FF9F0A", font=("Consolas", 10))
+        self.bisection_result_text.tag_configure("title", foreground=self.colors["accent"], font=("Consolas", 12, "bold"))
+        self.bisection_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 12))
+        self.bisection_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 12, "bold"))
+        self.bisection_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 14, "bold"))
+        self.bisection_result_text.tag_configure("warning", foreground="#FF9F0A", font=("Consolas", 12))
         
         # Mensaje inicial
         self.bisection_result_text.insert("1.0", "Los resultados del método de bisección se mostrarán aquí.")
@@ -2100,6 +2010,33 @@ class MatrixCalculator:
                              padx=10, pady=5, cursor="hand2")
         help_btn.pack(side="left")
 
+        # Right-side preview + plot similar to bisection
+        right_frame_fp = tk.Frame(top_frame, bg=self.colors["background"]) 
+        right_frame_fp.pack(side="right", fill="both", expand=True, padx=(10,0))
+
+        prev_frame_fp = tk.Frame(right_frame_fp, bg=self.colors["secondary_bg"], relief="flat", bd=1)
+        prev_frame_fp.pack(fill="x", pady=(0,8))
+        tk.Label(prev_frame_fp, text="Previsualización:", font=("Segoe UI", 10, "bold"),
+             bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
+
+        self.fp_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.fp_prev_ax = self.fp_preview_fig.add_subplot(111)
+        self.fp_prev_ax.axis('off')
+        self.fp_prev_canvas = FigureCanvasTkAgg(self.fp_preview_fig, prev_frame_fp)
+        self.fp_prev_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
+
+        plot_frame_fp = tk.Frame(right_frame_fp, bg=self.colors["background"])
+        plot_frame_fp.pack(fill="both", expand=True)
+        # Usar el mismo tamaño de gráfica que en Bisección (más amplio)
+        self.fp_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.fp_plot_ax = self.fp_plot_fig.add_subplot(111)
+        self.fp_plot_canvas = FigureCanvasTkAgg(self.fp_plot_fig, plot_frame_fp)
+        self.fp_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
+
+        # Bind preview update
+        self.fp_function_entry.bind('<KeyRelease>', lambda e: self.update_falsepos_preview())
+        self.update_falsepos_preview()
+
         # Parámetros
         params_frame = tk.Frame(top_frame, bg=self.colors["background"]) 
         params_frame.pack(fill="x", pady=(10, 0))
@@ -2167,7 +2104,9 @@ class MatrixCalculator:
 
         # Frame para el teclado virtual (visible por defecto)
         self.fp_keyboard_frame = tk.Frame(main_frame, bg=self.colors["matrix_bg"], relief="flat", bd=1)
-        self.fp_keyboard_frame.pack(pady=(15, 0), fill="x", padx=20)
+        # Guardar referencia al btn_frame de falsa posición para centrar el teclado
+        self.fp_btn_frame = btn_frame
+        self.fp_keyboard_frame.place(in_=self.fp_btn_frame, relx=0.5, rely=1.06, anchor="n")
         self.fp_keyboard_visible = True
         
         self.setup_virtual_keyboard_fp()
@@ -2177,17 +2116,21 @@ class MatrixCalculator:
         self.fp_result_frame.pack(fill="both", expand=True, pady=(15, 0))
         tk.Label(self.fp_result_frame, text="Resultados:", font=("Segoe UI", 14, "bold"),
                  bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0, 10))
-        self.falsepos_result_text = scrolledtext.ScrolledText(
-            self.fp_result_frame, width=80, height=20, font=("Consolas", 10),
-            bg=self.colors["secondary_bg"], fg=self.colors["text"],
-            insertbackground=self.colors["text"], relief="flat", bd=1
-        )
-        self.falsepos_result_text.pack(fill="both", expand=True)
-        self.falsepos_result_text.tag_configure("title", foreground="#FFB703", font=("Consolas", 10, "bold"))
-        self.falsepos_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 10))
-        self.falsepos_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 10, "bold"))
-        self.falsepos_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 11, "bold"))
-        self.falsepos_result_text.tag_configure("warning", foreground="#FF9F0A", font=("Consolas", 10))
+        # Área de resultados con scrollbar vertical explícita
+        fp_results_container = tk.Frame(self.fp_result_frame, bg=self.colors["background"])
+        fp_results_container.pack(fill="both", expand=True)
+        self.falsepos_result_text = tk.Text(fp_results_container, width=100, height=28, font=("Consolas", 14),
+                            bg=self.colors["secondary_bg"], fg=self.colors["text"],
+                            insertbackground=self.colors["text"], relief="flat", bd=1, wrap="none")
+        fp_vsb = tk.Scrollbar(fp_results_container, orient="vertical", command=self.falsepos_result_text.yview)
+        self.falsepos_result_text.configure(yscrollcommand=fp_vsb.set)
+        fp_vsb.pack(side="right", fill="y")
+        self.falsepos_result_text.pack(side="left", fill="both", expand=True)
+        self.falsepos_result_text.tag_configure("title", foreground="#FFB703", font=("Consolas", 12, "bold"))
+        self.falsepos_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 12))
+        self.falsepos_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 12, "bold"))
+        self.falsepos_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 14, "bold"))
+        self.falsepos_result_text.tag_configure("warning", foreground="#FF9F0A", font=("Consolas", 12))
         self.falsepos_result_text.insert("1.0", "Los resultados de Falsa Posición se mostrarán aquí.")
         self.falsepos_result_text.config(state="disabled")
 
@@ -2230,6 +2173,13 @@ class MatrixCalculator:
             self.falsepos_result_text.insert(tk.END, f"Tolerancia: {tolerance}\n", "step")
             self.falsepos_result_text.insert(tk.END, f"Máximo de iteraciones: {max_iterations}\n\n", "step")
 
+            # Encabezado de tabla
+            self.falsepos_result_text.insert(tk.END, "\nTABLA DE ITERACIONES:\n", "title")
+            self.falsepos_result_text.insert(tk.END, "=" * 95 + "\n", "step")
+            header = f"{'Iter':<6} {'a':>14} {'b':>14} {'c':>14} {'f(a)':>14} {'f(b)':>14} {'f(c)':>14} {'Error':>14}\n"
+            self.falsepos_result_text.insert(tk.END, header, "step")
+            self.falsepos_result_text.insert(tk.END, "-" * 95 + "\n", "step")
+
             iteration = 0
             prev_c = None
 
@@ -2243,42 +2193,46 @@ class MatrixCalculator:
                 c = b - fb * (b - a) / (fb - fa)
                 fc = self.evaluate_function(c, func_str)
 
-                self.falsepos_result_text.insert(tk.END, f"Iteración {iteration + 1}:\n", "step")
-                self.falsepos_result_text.insert(tk.END, f"  a = {a:.8f}, f(a) = {fa:.8f}\n")
-                self.falsepos_result_text.insert(tk.END, f"  b = {b:.8f}, f(b) = {fb:.8f}\n")
-                self.falsepos_result_text.insert(tk.END, f"  c = {c:.8f}, f(c) = {fc:.8f}\n")
-
+                # error mostrado será |f(c)|
                 error_c = abs(fc)
-                error_intervalo = abs(b - a)
-                self.falsepos_result_text.insert(tk.END, f"  Error |f(c)| = {error_c:.8f}, ancho intervalo = {error_intervalo:.8f}\n")
+                row = f"{iteration+1:<6} {a:>14.8f} {b:>14.8f} {c:>14.8f} {fa:>14.8f} {fb:>14.8f} {fc:>14.8f} {error_c:>14.8f}\n"
+                self.falsepos_result_text.insert(tk.END, row, "matrix")
 
-                if abs(fc) <= tolerance or (prev_c is not None and abs(c - prev_c) <= tolerance) or error_intervalo <= tolerance:
-                    prev_c = c
-                    break
-
+                # Mostrar actualización de intervalo (breve)
                 if fa * fc < 0:
                     b = c
                     fb = fc
-                    self.falsepos_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(a) * f(c) < 0)\n\n")
+                    self.falsepos_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(a) * f(c) < 0)\n", "step")
                 else:
                     a = c
                     fa = fc
-                    self.falsepos_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(b) * f(c) < 0)\n\n")
+                    self.falsepos_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(b) * f(c) < 0)\n", "step")
+
+                self.falsepos_result_text.insert(tk.END, "\n")
+
+                if abs(fc) <= tolerance or (prev_c is not None and abs(c - prev_c) <= tolerance) or abs(b - a) <= tolerance:
+                    prev_c = c
+                    iteration += 1
+                    break
 
                 prev_c = c
                 iteration += 1
 
             root = prev_c if prev_c is not None else (a + b) / 2
-            self.falsepos_result_text.insert(tk.END, "=" * 60 + "\n", "title")
+            self.falsepos_result_text.insert(tk.END, "=" * 95 + "\n\n", "step")
             self.falsepos_result_text.insert(tk.END, "RESULTADO FINAL (Falsa Posición):\n", "result")
-            self.falsepos_result_text.insert(tk.END, f"Raíz aproximada: x = {root:.8f}\n", "result")
+            self.falsepos_result_text.insert(tk.END, f"La raiz aproximada es x = {root:.8f}\n", "result")
             self.falsepos_result_text.insert(tk.END, f"f({root:.8f}) = {self.evaluate_function(root, func_str):.2e}\n", "result")
-            self.falsepos_result_text.insert(tk.END, f"Número de iteraciones: {iteration}\n", "result")
-            self.falsepos_result_text.insert(tk.END, f"Error final |f(c)|: {abs(self.evaluate_function(root, func_str)):.2e}\n", "result")
+            self.falsepos_result_text.insert(tk.END, f"Converge en {iteration} iteraciones\n", "result")
+            self.falsepos_result_text.insert(tk.END, f"El error final |f(c)| es: {abs(self.evaluate_function(root, func_str)):.2e}\n", "result")
 
             if iteration >= max_iterations:
                 self.falsepos_result_text.insert(tk.END, "\n⚠ ADVERTENCIA: Se alcanzó el máximo de iteraciones\n", "warning")
 
+            try:
+                self.falsepos_result_text.see(tk.END)
+            except Exception:
+                pass
             self.falsepos_result_text.config(state="disabled")
 
         except ValueError as e:
@@ -2336,20 +2290,41 @@ class MatrixCalculator:
                 messagebox.showerror("Error al graficar", "No se pudieron evaluar puntos válidos en el intervalo.")
                 return
 
-            # Graficar
-            plt.figure(figsize=(7, 4.5))
-            # Mostrar función con valores numéricos
+            # Graficar en área embebida si existe
             formatted_func = self.format_function_display(func_str)
-            plt.plot(xs, ys, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
-            plt.axhline(0, color="#FF453A", linewidth=1)
-            plt.axvline(0, color="#FF9F0A", linewidth=1)
-            plt.title(f"Gráfica de f(x) = {formatted_func} - Falsa Posición")
-            plt.xlabel("x")
-            plt.ylabel("f(x)")
-            plt.grid(True, linestyle="--", alpha=0.5)
-            plt.legend()
-            plt.tight_layout()
-            plt.show()
+            use_embedded = hasattr(self, 'fp_plot_canvas')
+            if use_embedded:
+                ax = self.fp_plot_ax
+                ax.clear()
+                ax.plot(xs, ys, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
+                ax.axhline(0, color="#FF453A", linewidth=1)
+                ax.axvline(0, color="#FF9F0A", linewidth=1)
+                ax.set_title(f"Gráfica de f(x) = {formatted_func} - Falsa Posición")
+                ax.set_xlabel('x')
+                ax.set_ylabel('f(x)')
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.legend()
+                try:
+                    self.fp_plot_canvas.draw()
+                except Exception:
+                    pass
+            else:
+                # Fallback: ventana emergente con matplotlib
+                plot_window = tk.Toplevel(self.root)
+                plot_window.title(f"Gráfica de f(x) = {formatted_func}")
+                fig = Figure(figsize=(7, 4.5), dpi=100)
+                ax = fig.add_subplot(111)
+                ax.plot(xs, ys, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
+                ax.axhline(0, color="#FF453A", linewidth=1)
+                ax.axvline(0, color="#FF9F0A", linewidth=1)
+                ax.set_title(f"Gráfica de f(x) = {formatted_func} - Falsa Posición")
+                ax.set_xlabel('x')
+                ax.set_ylabel('f(x)')
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.legend()
+                canvas = FigureCanvasTkAgg(fig, plot_window)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         except ValueError as e:
             messagebox.showerror("Error", str(e))
         except Exception as e:
@@ -2426,7 +2401,7 @@ class MatrixCalculator:
         """Configura el teclado virtual para funciones matemáticas"""
         # Botones de funciones matemáticas
         func_frame = tk.Frame(self.keyboard_frame, bg=self.colors["matrix_bg"])
-        func_frame.pack(pady=15, padx=10)
+        func_frame.pack(pady=12, padx=10, anchor="center")
         
         tk.Label(func_frame, text="Funciones Matemáticas:", 
                 font=("Segoe UI", 13, "bold"),
@@ -2434,16 +2409,16 @@ class MatrixCalculator:
         
         # Frame para los botones usando grid
         buttons_frame = tk.Frame(func_frame, bg=self.colors["matrix_bg"])
-        buttons_frame.pack()
+        buttons_frame.pack(anchor="center")
         
         # Botones de funciones
         functions = [
             ("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"),
             ("exp(x)", "exp(x)"), ("log(x)", "log(x)"), ("sqrt(x)", "sqrt(x)"),
-            ("x²", "x**2"), ("x³", "x**3"), ("1/x", "1/x"),
+            ("x²", "x^2"), ("x³", "x^3"), ("1/x", "1/x"),
             ("x", "x"), ("π", "pi"), ("e", "e"),
             ("+", "+"), ("-", "-"), ("×", "*"), ("/", "/"),
-            ("(", "("), (")", ")"), ("^", "**")
+            ("(", "("), (")", ")"), ("^", "^")
         ]
         
         # Estilos mejorados para botones
@@ -2531,12 +2506,12 @@ class MatrixCalculator:
             # Usar variable de estado para rastrear visibilidad
             if self.keyboard_visible:
                 # Ocultar el teclado
-                self.keyboard_frame.pack_forget()
+                self.keyboard_frame.place_forget()
                 self.keyboard_visible = False
                 self.keyboard_btn.config(text="⌨ Mostrar Teclado")
             else:
-                # Mostrar el teclado - empaquetar antes del frame de resultados
-                self.keyboard_frame.pack(pady=(15, 0), fill="x", padx=20, before=self.bisection_result_frame)
+                # Mostrar el teclado centrado respecto a los botones
+                self.keyboard_frame.place(in_=self.bisection_btn_frame, relx=0.5, rely=1.06, anchor="n")
                 self.keyboard_visible = True
                 self.keyboard_btn.config(text="🔽 Ocultar Teclado")
                 # Forzar actualización
@@ -2545,7 +2520,7 @@ class MatrixCalculator:
         except Exception as e:
             # Si hay error, intentar mostrar el teclado
             try:
-                self.keyboard_frame.pack(pady=(15, 0), fill="x", padx=20, before=self.bisection_result_frame)
+                self.keyboard_frame.place(in_=self.bisection_btn_frame, relx=0.5, rely=1.06, anchor="n")
                 self.keyboard_visible = True
                 self.keyboard_btn.config(text="🔽 Ocultar Teclado")
                 self.keyboard_frame.update_idletasks()
@@ -2588,53 +2563,7 @@ class MatrixCalculator:
         Returns:
             String formateado con símbolos y superíndices
         """
-        import re
-        
-        # Diccionario para convertir números a superíndices Unicode
-        superscript_map = {
-            '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-            '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
-            '+': '⁺', '-': '⁻', '(': '⁽', ')': '⁾',
-            'x': 'ˣ', 'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ',
-            'e': 'ᵉ', 'f': 'ᶠ', 'g': 'ᵍ', 'h': 'ʰ', 'i': 'ⁱ',
-            'j': 'ʲ', 'k': 'ᵏ', 'l': 'ˡ', 'm': 'ᵐ', 'n': 'ⁿ',
-            'o': 'ᵒ', 'p': 'ᵖ', 'r': 'ʳ', 's': 'ˢ', 't': 'ᵗ',
-            'u': 'ᵘ', 'v': 'ᵛ', 'w': 'ʷ', 'y': 'ʸ', 'z': 'ᶻ'
-        }
-        
-        def to_superscript(text):
-            """Convierte texto a superíndice Unicode"""
-            return ''.join(superscript_map.get(char, char) for char in text)
-        
-        result = func_str
-        
-        # Convertir pi a símbolo π si está como texto
-        result = re.sub(r'\bpi\b', 'π', result)
-        
-        # Convertir exp(x) a e^(x) y luego a eˣ
-        result = re.sub(r'\bexp\(([^)]+)\)', r'e^(\1)', result)
-        
-        # Convertir exponentes: e^x, e^(x), x^2, etc. a formato superíndice
-        def replace_power(match):
-            base = match.group(1)
-            exponent = match.group(2)
-            
-            # Convertir el exponente a superíndice
-            # Primero manejar casos simples
-            if len(exponent) == 1:
-                # Un solo carácter: x, 2, 3, etc.
-                return base + to_superscript(exponent)
-            else:
-                # Múltiples caracteres: convertir cada uno que sea posible
-                converted = ''
-                for char in exponent:
-                    if char in superscript_map:
-                        converted += superscript_map[char]
-                    else:
-                        converted += char
-                return base + converted
-        
-        # Reemplazar patrones de potencia: base^exponente
+        return math_utils.format_function_display(func_str)
         # Primero manejar casos con paréntesis: e^(x+1), x^(2+3), etc.
         def replace_power_with_paren(match):
             base = match.group(1)
@@ -2673,10 +2602,10 @@ class MatrixCalculator:
         functions = [
             ("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"),
             ("exp(x)", "exp(x)"), ("log(x)", "log(x)"), ("sqrt(x)", "sqrt(x)"),
-            ("x²", "x**2"), ("x³", "x**3"), ("1/x", "1/x"),
+            ("x²", "x^2"), ("x³", "x^3"), ("1/x", "1/x"),
             ("x", "x"), ("π", "pi"), ("e", "e"),
             ("+", "+"), ("-", "-"), ("×", "*"), ("/", "/"),
-            ("(", "("), (")", ")"), ("^", "**")
+            ("(", "("), (")", ")"), ("^", "^")
         ]
         
         # Estilos mejorados para botones
@@ -2788,12 +2717,12 @@ class MatrixCalculator:
         try:
             if self.fp_keyboard_visible:
                 # Ocultar el teclado
-                self.fp_keyboard_frame.pack_forget()
+                self.fp_keyboard_frame.place_forget()
                 self.fp_keyboard_visible = False
                 self.fp_keyboard_btn.config(text="⌨ Mostrar Teclado")
             else:
-                # Mostrar el teclado - empaquetar antes del frame de resultados
-                self.fp_keyboard_frame.pack(pady=(15, 0), fill="x", padx=20, before=self.fp_result_frame)
+                # Mostrar el teclado centrado respecto a los botones
+                self.fp_keyboard_frame.place(in_=self.fp_btn_frame, relx=0.5, rely=1.06, anchor="n")
                 self.fp_keyboard_visible = True
                 self.fp_keyboard_btn.config(text="🔽 Ocultar Teclado")
                 # Forzar actualización
@@ -2802,7 +2731,7 @@ class MatrixCalculator:
         except Exception as e:
             # Si hay error, intentar mostrar el teclado
             try:
-                self.fp_keyboard_frame.pack(pady=(15, 0), fill="x", padx=20, before=self.fp_result_frame)
+                self.fp_keyboard_frame.place(in_=self.fp_btn_frame, relx=0.5, rely=1.06, anchor="n")
                 self.fp_keyboard_visible = True
                 self.fp_keyboard_btn.config(text="🔽 Ocultar Teclado")
                 self.fp_keyboard_frame.update_idletasks()
@@ -2810,151 +2739,10 @@ class MatrixCalculator:
                 pass
 
     def preprocess_function(self, func_str):
-        """Preprocesa la función para convertir notaciones comunes"""
-        s = func_str.strip()
-        if not s:
-            return s
-        
-        # Guardar la función original
-        original_func = s
-        
-        # Normalizaciones comunes
-        s = s.replace(" ", "")
-        
-        # Convertir e^x a exp(x) ANTES de convertir ^ a **
-        # Manejar e^x, e^(x), e^(x+1), etc.
-        s = re.sub(r'\be\*\*\(([^)]+)\)', r'exp(\1)', s)  # e^(x+1) -> exp(x+1)
-        s = re.sub(r'\be\*\*([a-zA-Z0-9_]+)', r'exp(\1)', s)  # e^x -> exp(x)
-        s = re.sub(r'\be\^\(([^)]+)\)', r'exp(\1)', s)  # e^(x+1) -> exp(x+1)
-        s = re.sub(r'\be\^([a-zA-Z0-9_]+)', r'exp(\1)', s)  # e^x -> exp(x)
-        
-        # Convertir ^ a ** para potencias
-        s = s.replace("^", "**")
-        
-        # Corregir errores comunes: +^ o -^ seguido de número (probablemente falta x)
-        # Ejemplo: +^3 -> +x**3, -^2 -> -x**2
-        s = re.sub(r'([+\-])\*\*(\d+)', r'\1x**\2', s)
-        
-        # Convertir multiplicación implícita: número seguido de x o paréntesis
-        # Ejemplo: 10x -> 10*x, 5( -> 5*(
-        s = re.sub(r'(\d+)([a-zA-Z(])', r'\1*\2', s)
-        # Ejemplo: )x -> )*x, )( -> )*(
-        s = re.sub(r'\)([a-zA-Z(])', r')*\1', s)
-        # Ejemplo: x( -> x*(
-        s = re.sub(r'([a-zA-Z])(\()', r'\1*\2', s)
-        
-        # Sinónimos en español (palabras completas o seguidas de letra)
-        # Convertir sen seguido de letra o límite de palabra a sin
-        s = re.sub(r'\bsen([a-zA-Z])', r'sin\1', s)  # senx -> sinx, sen( -> sin(
-        s = re.sub(r'\bsen\b', 'sin', s)  # sen solo -> sin
-        s = re.sub(r'\bln([a-zA-Z])', r'log\1', s)  # lnx -> logx
-        s = re.sub(r'\bln\b', 'log', s)  # ln solo -> log
-        
-        # Convertir variable seguida de función seguida de variable: xlogx -> x*log(x)
-        # Esto debe hacerse antes de convertir funciones solas
-        for name in ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt']:
-            s = re.sub(rf'([a-zA-Z]){name}([a-zA-Z])', rf'\1*{name}(\2)', s)
-        s = re.sub(r'([a-zA-Z])log10([a-zA-Z])', r'\1*log10(\2)', s)
-        s = re.sub(r'([a-zA-Z])abs([a-zA-Z])', r'\1*abs(\2)', s)
-        
-        # Convertir funciones seguidas de variable (sin espacio ni paréntesis) a función(variable)
-        # Ejemplo: sinx -> sin(x), cosx -> cos(x), senx -> sin(x)
-        for name in ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt']:
-            s = re.sub(rf'\b{name}([a-zA-Z])', rf'{name}(\1)', s)
-        s = re.sub(r'\blog10([a-zA-Z])', r'log10(\1)', s)
-        s = re.sub(r'\babs([a-zA-Z])', r'abs(\1)', s)
-        
-        # Convertir funciones seguidas de variable (con espacio) a función(variable)
-        # Ejemplo: sin x -> sin(x), cos x -> cos(x)
-        for name in ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt']:
-            s = re.sub(rf'\b{name}\s+([a-zA-Z])', rf'{name}(\1)', s)
-        s = re.sub(r'\blog10\s+([a-zA-Z])', r'log10(\1)', s)
-        s = re.sub(r'\babs\s+([a-zA-Z])', r'abs(\1)', s)
-        
-        # Prefijar funciones del módulo math cuando sean llamadas
-        for name in ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt']:
-            s = re.sub(rf'\b{name}\s*(?=\()', f'math.{name}', s)
-        s = re.sub(r'\blog10\s*(?=\()', 'math.log10', s)
-        s = re.sub(r'\babs\s*(?=\()', 'abs', s)
-        
-        # Constantes: pi y e, evitando romper nombres de funciones
-        s = re.sub(r'π', 'math.pi', s)
-        s = re.sub(r'(?<!\w)pi(?!\w)', 'math.pi', s)
-        # Solo convertir 'e' a math.e si no es parte de 'exp' o ya está en una expresión
-        # Evitar convertir 'e' en 'exp(x)' o 'math.exp'
-        s = re.sub(r'(?<!\w)(?<!math\.)(?<!exp\()e(?!\w)(?!xp)', 'math.e', s)
-        
-        # Convertir math.e**x en exp(x) para mayor claridad (por si acaso)
-        s = re.sub(r'math\.e\*\*(\([^()]*\)|[A-Za-z0-9_.]+)', r'math.exp(\1)', s)
-        
-        return s
+        return math_utils.preprocess_function(func_str)
 
     def evaluate_function(self, x, func_str):
-        """Evalúa la función en el punto x, aceptando notaciones comunes e inserta multiplicación implícita."""
-        try:
-            s = func_str.strip()
-            if not s:
-                raise ValueError("Función vacía")
-
-            original_func = s
-
-            # Normalizaciones comunes
-            s = s.replace(" ", "")
-            s = s.replace("^", "**")  # permitir ^ como potencia
-
-            # Sinónimos en español
-            s = re.sub(r'\bsen\b', 'sin', s)
-            s = re.sub(r'\bln\b', 'log', s)
-
-            # Prefijar funciones del módulo math cuando son llamadas
-            for name in ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt']:
-                s = re.sub(rf'\b{name}\s*(?=\()', f'math.{name}', s)
-            s = re.sub(r'\blog10\s*(?=\()', 'math.log10', s)
-            s = re.sub(r'\babs\s*(?=\()', 'abs', s)
-
-            # Constantes
-            s = re.sub(r'π', 'math.pi', s)
-            s = re.sub(r'(?<!\w)pi(?!\w)', 'math.pi', s)
-            s = re.sub(r'(?<!\w)e(?!\w)', 'math.e', s)
-
-            # e^x -> exp(x)
-            s = re.sub(r'math\.e\*\*(\([^()]*\)|[A-Za-z0-9_.]+)', r'math.exp(\1)', s)
-
-            # Inserción de multiplicación implícita
-            # número seguido de x o '('
-            s = re.sub(r'(?<=\d)(?=x|\()', '*', s)
-            # x seguido de número o '('
-            s = re.sub(r'(?<=x)(?=\d|\()', '*', s)
-            # ')' seguido de dígito, 'x' o '('
-            s = re.sub(r'(?<=\))(?=[\dx(])', '*', s)
-            # constantes seguidas de dígito, 'x' o '('
-            s = re.sub(r'(?<=math\.pi)(?=[\dx(])', '*', s)
-            s = re.sub(r'(?<=math\.e)(?=[\dx(])', '*', s)
-
-            # Validación de AST (permitir solo x, math y números)
-            try:
-                tree = ast.parse(s, mode='eval')
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Name) and node.id not in ['x', 'math']:
-                        raise ValueError(f"Variable no permitida: {node.id}")
-                    elif isinstance(node, ast.Attribute) and node.attr not in ['sin', 'cos', 'tan', 'exp', 'log', 'log10', 'pi', 'e', 'sqrt']:
-                        raise ValueError(f"Función no permitida: {node.attr}")
-            except SyntaxError:
-                raise ValueError(f"Sintaxis inválida en la función: {original_func}")
-
-            # Evaluación segura
-            env = {"x": x, "math": math, "abs": abs}
-            result = eval(s, {"__builtins__": {}}, env)
-
-            if not isinstance(result, (int, float)):
-                raise ValueError("La función debe devolver un número")
-
-            return float(result)
-
-        except ValueError as e:
-            raise ValueError(str(e))
-        except Exception as e:
-            raise ValueError(f"Error al evaluar la función '{original_func}': {str(e)}")
+        return math_utils.evaluate_function(x, func_str)
 
     def calculate_bisection(self):
         """Implementa el método de bisección"""
@@ -2996,7 +2784,7 @@ class MatrixCalculator:
             # Mostrar información inicial
             self.bisection_result_text.insert("1.0", f"MÉTODO DE BISECCIÓN\n", "title")
             # Mostrar función con valores numéricos en lugar de símbolos
-            formatted_func = self.format_function_display(func_str)
+            formatted_func = math_utils.format_function_display(func_str)
             self.bisection_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
             self.bisection_result_text.insert(tk.END, f"Intervalo inicial: [{a}, {b}]\n", "step")
             self.bisection_result_text.insert(tk.END, f"Tolerancia: {tolerance}\n", "step")
@@ -3006,7 +2794,7 @@ class MatrixCalculator:
             self.bisection_result_text.insert(tk.END, "\nTABLA DE ITERACIONES:\n", "title")
             self.bisection_result_text.insert(tk.END, "=" * 95 + "\n", "step")
             # Encabezados de columnas
-            header = f"{'Iter':<6} {'a':>12} {'b':>12} {'c':>12} {'f(a)':>12} {'f(b)':>12} {'f(c)':>12} {'Error':>12}\n"
+            header = f"{'Iter':<6} {'a':>14} {'b':>14} {'c':>14} {'f(a)':>14} {'f(b)':>14} {'f(c)':>14} {'Error':>14}\n"
             self.bisection_result_text.insert(tk.END, header, "step")
             self.bisection_result_text.insert(tk.END, "-" * 95 + "\n", "step")
             
@@ -3016,11 +2804,11 @@ class MatrixCalculator:
                 c = (a + b) / 2
                 fc = self.evaluate_function(c, func_str)
                 error = abs(b - a) / 2
-                
+
                 # Mostrar información de la iteración en formato de tabla
-                row = f"{'+' + str(iteration + 1):<6} {a:>+12.4f} {b:>+12.4f} {c:>+12.4f} {fa:>+12.4f} {fb:>+12.4f} {fc:>+12.4f} {error:>+12.4f}\n"
+                row = f"{iteration+1:<6} {a:>14.8f} {b:>14.8f} {c:>14.8f} {fa:>14.8f} {fb:>14.8f} {fc:>14.8f} {error:>14.8f}\n"
                 self.bisection_result_text.insert(tk.END, row, "matrix")
-                
+
                 # Determinar el nuevo intervalo
                 if fa * fc < 0:
                     b = c
@@ -3028,7 +2816,7 @@ class MatrixCalculator:
                 else:
                     a = c
                     fa = fc
-                
+
                 iteration += 1
             
             # Línea final de la tabla
@@ -3043,14 +2831,19 @@ class MatrixCalculator:
             
             self.bisection_result_text.insert(tk.END, "=" * 60 + "\n", "title")
             self.bisection_result_text.insert(tk.END, "RESULTADO FINAL:\n", "result")
-            self.bisection_result_text.insert(tk.END, f"Raíz aproximada: x = {root:.8f}\n", "result")
+            self.bisection_result_text.insert(tk.END, f"La raiz aproximada es x = {root:.8f}\n", "result")
             self.bisection_result_text.insert(tk.END, f"f({root:.8f}) = {self.evaluate_function(root, func_str):.2e}\n", "result")
-            self.bisection_result_text.insert(tk.END, f"Número de iteraciones: {iteration}\n", "result")
-            self.bisection_result_text.insert(tk.END, f"Error estimado final: {(b - a) / 2:.2e}\n", "result")
+            self.bisection_result_text.insert(tk.END, f"Converge en {iteration} iteraciones\n", "result")
+            self.bisection_result_text.insert(tk.END, f"El error estimado final (ancho/2) es: {(b - a) / 2:.2e}\n", "result")
             
             if iteration >= max_iterations:
                 self.bisection_result_text.insert(tk.END, "\n⚠ ADVERTENCIA: Se alcanzó el máximo de iteraciones\n", "warning")
             
+            # Asegurar que la vista muestre el final
+            try:
+                self.bisection_result_text.see(tk.END)
+            except Exception:
+                pass
             self.bisection_result_text.config(state="disabled")
             
         except ValueError as e:
@@ -3093,11 +2886,18 @@ class MatrixCalculator:
             self.bisection_result_text.delete("1.0", tk.END)
             self.bisection_result_text.insert("1.0", f"MÉTODO DE FALSA POSICIÓN (Regla Falsa)\n", "title")
             # Mostrar función con valores numéricos en lugar de símbolos
-            formatted_func = self.format_function_display(func_str)
+            formatted_func = math_utils.format_function_display(func_str)
             self.bisection_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
             self.bisection_result_text.insert(tk.END, f"Intervalo inicial: [{a}, {b}]\n", "step")
             self.bisection_result_text.insert(tk.END, f"Tolerancia: {tolerance}\n", "step")
             self.bisection_result_text.insert(tk.END, f"Máximo de iteraciones: {max_iterations}\n\n", "step")
+
+            # Encabezado de la tabla
+            self.bisection_result_text.insert(tk.END, "\nTABLA DE ITERACIONES:\n", "title")
+            self.bisection_result_text.insert(tk.END, "=" * 95 + "\n", "step")
+            header = f"{'Iter':<6} {'a':>14} {'b':>14} {'c':>14} {'f(a)':>14} {'f(b)':>14} {'f(c)':>14} {'Error':>14}\n"
+            self.bisection_result_text.insert(tk.END, header, "step")
+            self.bisection_result_text.insert(tk.END, "-" * 95 + "\n", "step")
 
             iteration = 0
             prev_c = None
@@ -3114,45 +2914,47 @@ class MatrixCalculator:
                 c = b - fb * (b - a) / (fb - fa)
                 fc = self.evaluate_function(c, func_str)
 
-                # Log de iteración
-                self.bisection_result_text.insert(tk.END, f"Iteración {iteration + 1}:\n", "step")
-                self.bisection_result_text.insert(tk.END, f"  a = {a:.8f}, f(a) = {fa:.8f}\n")
-                self.bisection_result_text.insert(tk.END, f"  b = {b:.8f}, f(b) = {fb:.8f}\n")
-                self.bisection_result_text.insert(tk.END, f"  c = {c:.8f}, f(c) = {fc:.8f}\n")
-
-                # Criterios de parada
+                # error mostrado será |f(c)|
                 error_c = abs(fc)
-                error_intervalo = abs(b - a)
-                self.bisection_result_text.insert(tk.END, f"  Error |f(c)| = {error_c:.8f}, ancho intervalo = {error_intervalo:.8f}\n")
-
-                if abs(fc) <= tolerance or (prev_c is not None and abs(c - prev_c) <= tolerance) or error_intervalo <= tolerance:
-                    prev_c = c
-                    break
+                row = f"{iteration+1:<6} {a:>14.8f} {b:>14.8f} {c:>14.8f} {fa:>14.8f} {fb:>14.8f} {fc:>14.8f} {error_c:>14.8f}\n"
+                self.bisection_result_text.insert(tk.END, row, "matrix")
 
                 # Actualizar intervalo según cambio de signo
                 if fa * fc < 0:
                     b = c
                     fb = fc
-                    self.bisection_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(a) * f(c) < 0)\n\n")
+                    self.bisection_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(a) * f(c) < 0)\n", "step")
                 else:
                     a = c
                     fa = fc
-                    self.bisection_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(b) * f(c) < 0)\n\n")
+                    self.bisection_result_text.insert(tk.END, f"  → Nuevo intervalo: [{a:.8f}, {b:.8f}] (f(b) * f(c) < 0)\n", "step")
+
+                self.bisection_result_text.insert(tk.END, "\n")
+
+                if abs(fc) <= tolerance or (prev_c is not None and abs(c - prev_c) <= tolerance) or abs(b - a) <= tolerance:
+                    prev_c = c
+                    iteration += 1
+                    break
 
                 prev_c = c
                 iteration += 1
 
             # Resultado final
             root = prev_c if prev_c is not None else (a + b) / 2
-            self.bisection_result_text.insert(tk.END, "=" * 60 + "\n", "title")
+            self.bisection_result_text.insert(tk.END, "=" * 95 + "\n\n", "step")
             self.bisection_result_text.insert(tk.END, "RESULTADO FINAL (Falsa Posición):\n", "result")
-            self.bisection_result_text.insert(tk.END, f"Raíz aproximada: x = {root:.8f}\n", "result")
+            self.bisection_result_text.insert(tk.END, f"La raiz aproximada es x = {root:.8f}\n", "result")
             self.bisection_result_text.insert(tk.END, f"f({root:.8f}) = {self.evaluate_function(root, func_str):.2e}\n", "result")
-            self.bisection_result_text.insert(tk.END, f"Número de iteraciones: {iteration}\n", "result")
-            self.bisection_result_text.insert(tk.END, f"Error final |f(c)|: {abs(self.evaluate_function(root, func_str)):.2e}\n", "result")
+            self.bisection_result_text.insert(tk.END, f"Converge en {iteration} iteraciones\n", "result")
+            self.bisection_result_text.insert(tk.END, f"El error final |f(c)| es: {abs(self.evaluate_function(root, func_str)):.2e}\n", "result")
 
             if iteration >= max_iterations:
                 self.bisection_result_text.insert(tk.END, "\n⚠ ADVERTENCIA: Se alcanzó el máximo de iteraciones\n", "warning")
+
+            try:
+                self.bisection_result_text.see(tk.END)
+            except Exception:
+                pass
 
             self.bisection_result_text.config(state="disabled")
 
@@ -3250,7 +3052,7 @@ class MatrixCalculator:
             try:
                 # Usar la variable de estado en lugar de verificar winfo
                 if not self.keyboard_visible:
-                    self.keyboard_frame.pack(pady=(15, 0), fill="x", padx=20, before=self.bisection_result_frame)
+                    self.keyboard_frame.pack(pady=(8, 0), fill="x", padx=20, before=self.bisection_result_frame)
                     self.keyboard_visible = True
                     self.keyboard_btn.config(text="🔽 Ocultar Teclado")
                     self.keyboard_frame.update_idletasks()
@@ -3292,46 +3094,37 @@ IMPORTANTE:
         messagebox.showinfo("Ayuda - Funciones Matemáticas", help_text)
 
     def evaluate_function_vectorized(self, x_array, func_str):
-        """Evalúa la función para un array de numpy (vectorizado)"""
+        return math_utils.evaluate_function_vectorized(x_array, func_str)
+
+    def update_bisection_preview(self):
+        """Renderiza una previsualización de la función en la pestaña de bisección"""
         try:
-            s = func_str.strip()
-            if not s:
-                raise ValueError("Función vacía")
-            
-            # Preprocesar la función (convierte multiplicación implícita, etc.)
-            s = self.preprocess_function(s)
-            
-            # Reemplazar math. con np. para funciones vectorizadas
-            s = s.replace("math.sin", "np.sin")
-            s = s.replace("math.cos", "np.cos")
-            s = s.replace("math.tan", "np.tan")
-            s = s.replace("math.exp", "np.exp")
-            s = s.replace("math.log", "np.log")
-            s = s.replace("math.log10", "np.log10")
-            s = s.replace("math.sqrt", "np.sqrt")
-            s = s.replace("math.pi", "np.pi")
-            s = s.replace("math.e", "np.e")
-            
-            # Evaluación vectorizada
-            env = {"x": x_array, "np": np, "math": math, "abs": np.abs}
+            func_str = self.function_var.get().strip()
+            disp = math_utils.format_function_display(func_str) if func_str else ""
             try:
-                result = eval(s, {"__builtins__": {}}, env)
-            except ValueError as ve:
-                # Manejar errores de dominio matemático
-                if "math domain error" in str(ve).lower() or "domain" in str(ve).lower():
-                    # Para gráficas, devolver NaN para valores inválidos
-                    return np.full_like(x_array, np.nan, dtype=float)
-                raise ValueError(f"Error al evaluar la función: {str(ve)}")
-            
-            result = np.array(result, dtype=float)
-            
-            # Reemplazar infinitos con NaN para que no se grafiquen
-            result = np.where(np.isinf(result), np.nan, result)
-            
-            return result
-            
-        except Exception as e:
-            raise ValueError(f"Error al evaluar la función: {str(e)}")
+                self.bis_prev_ax.clear()
+                self.bis_prev_ax.axis('off')
+                self.bis_prev_ax.text(0.01, 0.5, f"f(x) = {disp}", fontsize=12, va='center')
+                self.bis_prev_canvas.draw()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def update_falsepos_preview(self):
+        """Renderiza una previsualización de la función en la pestaña de falsa posición"""
+        try:
+            func_str = self.fp_function_var.get().strip()
+            disp = math_utils.format_function_display(func_str) if func_str else ""
+            try:
+                self.fp_prev_ax.clear()
+                self.fp_prev_ax.axis('off')
+                self.fp_prev_ax.text(0.01, 0.5, f"f(x) = {disp}", fontsize=12, va='center')
+                self.fp_prev_canvas.draw()
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     def plot_function(self):
         """Grafica la función usando matplotlib"""
@@ -3340,53 +3133,53 @@ IMPORTANTE:
             if not func_str:
                 messagebox.showerror("Error", "Por favor ingrese una función")
                 return
-            
+
             # Obtener intervalo
             try:
                 a = float(self.a_var.get())
                 b = float(self.b_var.get())
             except ValueError:
                 a, b = -5, 5  # Intervalo por defecto
-            
-            # Crear ventana para la gráfica
-            plot_window = tk.Toplevel(self.root)
-            # Mostrar función con valores numéricos en el título
+
+            # Preparar área de graficado: si existe canvas embebido úselo
             formatted_func = self.format_function_display(func_str)
-            plot_window.title(f"Gráfica de f(x) = {formatted_func}")
-            plot_window.geometry("800x600")
-            plot_window.configure(bg=self.colors["background"])
-            
-            # Crear figura de matplotlib
-            fig = Figure(figsize=(8, 6), dpi=100)
-            ax = fig.add_subplot(111)
-            
+            use_embedded = hasattr(self, 'bis_plot_canvas')
+            if use_embedded:
+                ax = self.bis_plot_ax
+                fig = self.bis_plot_fig
+                ax.clear()
+            else:
+                plot_window = tk.Toplevel(self.root)
+                plot_window.title(f"Gráfica de f(x) = {formatted_func}")
+                plot_window.geometry("800x600")
+                plot_window.configure(bg=self.colors["background"])
+                fig = Figure(figsize=(8, 6), dpi=100)
+                ax = fig.add_subplot(111)
+
             # Calcular rango de x (extender un poco más allá del intervalo)
             margin = max(abs(b - a) * 0.2, 1)
             x_min = min(a, b) - margin
             x_max = max(a, b) + margin
-            
+
             # Crear array de x
             x = np.linspace(x_min, x_max, 1000)
-            
+
             # Evaluar función
             try:
                 y = self.evaluate_function_vectorized(x, func_str)
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo evaluar la función: {str(e)}")
-                plot_window.destroy()
+                if not use_embedded:
+                    plot_window.destroy()
                 return
-            
+
             # Graficar función con formato numérico
             ax.plot(x, y, 'b-', linewidth=2, label=f'f(x) = {formatted_func}')
-            
-            # Graficar eje x
             ax.axhline(y=0, color='k', linewidth=0.8, linestyle='--', alpha=0.5)
             ax.axvline(x=0, color='k', linewidth=0.8, linestyle='--', alpha=0.5)
-            
-            # Marcar intervalo [a, b]
             ax.axvline(x=a, color='g', linewidth=2, linestyle=':', alpha=0.7, label=f'a = {a:.2f}')
             ax.axvline(x=b, color='r', linewidth=2, linestyle=':', alpha=0.7, label=f'b = {b:.2f}')
-            
+
             # Marcar puntos f(a) y f(b)
             try:
                 fa = self.evaluate_function(a, func_str)
@@ -3395,56 +3188,50 @@ IMPORTANTE:
                 ax.plot(b, fb, 'ro', markersize=8, label=f'f(b) = {fb:.3f}')
             except:
                 pass
-            
+
             # Marcar raíz calculada si existe
-            if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str'):
-                if self.calculated_func_str == func_str:
-                    root = self.calculated_root
-                    try:
-                        f_root = self.evaluate_function(root, func_str)
-                        ax.plot(root, f_root, 'm*', markersize=15, label=f'Raíz ≈ {root:.4f}')
-                        ax.axvline(x=root, color='m', linewidth=1.5, linestyle='--', alpha=0.6)
-                    except:
-                        pass
-            
-            # Configurar gráfica
-            ax.set_xlabel('x', fontsize=12)
-            ax.set_ylabel('f(x)', fontsize=12)
-            # Mostrar función con valores numéricos en el título
-            formatted_func = self.format_function_display(func_str)
-            ax.set_title(f'Gráfica de f(x) = {formatted_func}', fontsize=14, fontweight='bold')
+            if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str') and self.calculated_func_str == func_str:
+                root = self.calculated_root
+                try:
+                    f_root = self.evaluate_function(root, func_str)
+                    ax.plot(root, f_root, 'm*', markersize=15, label=f'Raíz ≈ {root:.4f}')
+                    ax.axvline(x=root, color='m', linewidth=1.5, linestyle='--', alpha=0.6)
+                except:
+                    pass
+
+            ax.set_xlabel('x')
+            ax.set_ylabel('f(x)')
+            ax.set_title(f'Gráfica de f(x) = {formatted_func}')
             ax.grid(True, alpha=0.3)
             ax.legend(loc='best', fontsize=9)
-            
+
             # Ajustar límites del eje y si es necesario
-            y_min, y_max = np.nanmin(y), np.nanmax(y)
-            if not (np.isnan(y_min) or np.isnan(y_max)):
-                y_range = y_max - y_min
-                if y_range > 0:
-                    ax.set_ylim(y_min - y_range * 0.1, y_max + y_range * 0.1)
-            
-            # Integrar matplotlib con tkinter
-            canvas = FigureCanvasTkAgg(fig, plot_window)
-            canvas.draw()
-            
-            # Agregar barra de herramientas de navegación personalizada sin coordenadas
-            from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
-            
-            # Crear una clase personalizada de toolbar sin formato de coordenadas
-            class CustomToolbar(NavigationToolbar2Tk):
-                def set_message(self, msg):
-                    # Sobrescribir para no mostrar coordenadas
+            try:
+                y_min, y_max = np.nanmin(y), np.nanmax(y)
+                if not (np.isnan(y_min) or np.isnan(y_max)):
+                    y_range = y_max - y_min
+                    if y_range > 0:
+                        ax.set_ylim(y_min - y_range * 0.1, y_max + y_range * 0.1)
+            except Exception:
+                pass
+
+            if use_embedded:
+                try:
+                    self.bis_plot_canvas.draw()
+                except Exception:
                     pass
-            
-            toolbar = CustomToolbar(canvas, plot_window)
-            toolbar.update()
-            
-            # Desactivar el formato de coordenadas en el eje
-            ax.format_coord = lambda x, y: ""
-            
-            # Empaquetar el canvas después de la toolbar
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-            
+            else:
+                canvas = FigureCanvasTkAgg(fig, plot_window)
+                canvas.draw()
+                from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
+                class CustomToolbar(NavigationToolbar2Tk):
+                    def set_message(self, msg):
+                        pass
+                toolbar = CustomToolbar(canvas, plot_window)
+                toolbar.update()
+                ax.format_coord = lambda x, y: ""
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
         except ValueError as e:
             messagebox.showerror("Error", str(e))
         except Exception as e:
