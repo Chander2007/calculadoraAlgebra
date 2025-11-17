@@ -47,22 +47,12 @@ def evaluate_function(x, func_str: str) -> float:
             raise ValueError("Función vacía")
 
         original_func = s
-        s = s.replace(" ", "")
-        s = s.replace('^', '**')
-        s = re.sub(r'\bsen\b', 'sin', s)
-        s = re.sub(r'\bln\b', 'log', s)
-        for name in ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt']:
-            s = re.sub(rf'\b{name}\s*(?=\()', f'math.{name}', s)
-        s = re.sub(r'\blog10\s*(?=\()', 'math.log10', s)
-        s = re.sub(r'π', 'math.pi', s)
-        s = re.sub(r'(?<!\w)pi(?!\w)', 'math.pi', s)
-        s = re.sub(r'(?<!\w)e(?!\w)', 'math.e', s)
-        s = re.sub(r'math\.e\*\*(\([^()]*\)|[A-Za-z0-9_.]+)', r'math.exp(\1)', s)
+        s = preprocess_function(s)
         s = re.sub(r'(?<=\d)(?=x|\()', '*', s)
         s = re.sub(r'(?<=x)(?=\d|\()', '*', s)
         s = re.sub(r'(?<=\))(?=[\dx(])', '*', s)
         s = re.sub(r'(?<=math\.pi)(?=[\dx(])', '*', s)
-        s = re.sub(r'(?<=math\.e)(?=[\dx(])', '*', s)
+        s = re.sub(r'(?<=math\.e)(?=(?:[\d(]|x(?!p)))', '*', s)
 
         # AST validation
         try:
@@ -113,7 +103,8 @@ def evaluate_function_vectorized(x_array, func_str: str):
         s = s.replace("math.pi", "np.pi")
         s = s.replace("math.e", "np.e")
         env = {"x": x_array, "np": np, "math": math, "abs": np.abs}
-        result = eval(s, {"__builtins__": {}}, env)
+        with np.errstate(all='ignore'):
+            result = eval(s, {"__builtins__": {}}, env)
         result = np.array(result, dtype=float)
         result = np.where(np.isinf(result), np.nan, result)
         return result
@@ -161,4 +152,10 @@ def format_function_display(func_str: str) -> str:
 
     result = re.sub(r'([a-zA-Z0-9πe]+)\^\(([^)]+)\)', replace_power_with_paren, result)
     result = re.sub(r'([a-zA-Z0-9πe]+)\^([a-zA-Z0-9]+)', replace_power, result)
+    def replace_power_unary_minus(match):
+        base = match.group(1)
+        sym = match.group(2)
+        converted = superscript_map['-'] + superscript_map.get(sym, sym)
+        return base + converted
+    result = re.sub(r'([a-zA-Z0-9πe]+)\^-([a-zA-Z0-9])', replace_power_unary_minus, result)
     return result

@@ -1777,6 +1777,7 @@ class MatrixCalculator:
         self.bis_hover_annot = self.bis_plot_ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points", bbox=dict(boxstyle="round", fc="#000", ec="#fff", alpha=0.6), color="#fff")
         self.bis_hover_annot.set_visible(False)
         self.bis_plot_canvas.mpl_connect('motion_notify_event', self.on_bis_motion)
+        self.bis_plot_canvas.mpl_connect('scroll_event', self.on_bis_scroll)
         expand_frame = tk.Frame(plot_frame, bg=self.colors["background"]) 
         expand_frame.pack(fill="x", pady=(0,4))
         tk.Button(expand_frame, text="⤢ Expandir", command=lambda: self.open_expanded_plot('bisection'), bg=self.colors["accent"], fg=self.colors["text"], relief="flat").pack(side="right")
@@ -2056,6 +2057,7 @@ class MatrixCalculator:
         self.fp_hover_annot = self.fp_plot_ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points", bbox=dict(boxstyle="round", fc="#000", ec="#fff", alpha=0.6), color="#fff")
         self.fp_hover_annot.set_visible(False)
         self.fp_plot_canvas.mpl_connect('motion_notify_event', self.on_fp_motion)
+        self.fp_plot_canvas.mpl_connect('scroll_event', self.on_fp_scroll)
         expand_frame_fp = tk.Frame(plot_frame_fp, bg=self.colors["background"]) 
         expand_frame_fp.pack(fill="x", pady=(0,4))
         tk.Button(expand_frame_fp, text="⤢ Expandir", command=lambda: self.open_expanded_plot('falsepos'), bg=self.colors["accent"], fg=self.colors["text"], relief="flat").pack(side="right")
@@ -2153,7 +2155,7 @@ class MatrixCalculator:
         self.falsepos_result_text.configure(yscrollcommand=fp_vsb.set)
         fp_vsb.pack(side="right", fill="y")
         self.falsepos_result_text.pack(side="left", fill="both", expand=True)
-        self.falsepos_result_text.tag_configure("title", foreground="#FFB703", font=("Consolas", 12, "bold"))
+        self.falsepos_result_text.tag_configure("title", foreground=self.colors["accent"], font=("Consolas", 12, "bold"))
         self.falsepos_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 12))
         self.falsepos_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 12, "bold"))
         self.falsepos_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 14, "bold"))
@@ -2306,7 +2308,7 @@ class MatrixCalculator:
                 messagebox.showerror("Error", "El valor de 'a' debe ser menor que 'b'")
                 return
 
-            # Muestreo: si ya se ha inicializado la vista, respetar límites actuales
+            use_embedded = hasattr(self, 'fp_plot_canvas')
             if use_embedded:
                 prev_xlim = self.fp_plot_ax.get_xlim()
                 restore_view = getattr(self, 'fp_plot_init_done', False)
@@ -2334,9 +2336,7 @@ class MatrixCalculator:
                 messagebox.showerror("Error al graficar", "No se pudieron evaluar puntos válidos en el intervalo.")
                 return
 
-            # Graficar en área embebida si existe
             formatted_func = self.format_function_display(func_str)
-            use_embedded = hasattr(self, 'fp_plot_canvas')
             if use_embedded:
                 ax = self.fp_plot_ax
                 prev_xlim = ax.get_xlim()
@@ -2360,8 +2360,8 @@ class MatrixCalculator:
                 if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str') and self.calculated_func_str == func_str:
                     try:
                         f_root = self.evaluate_function(self.calculated_root, func_str)
-                        ax.plot(self.calculated_root, f_root, 'm*', markersize=15, label=f'Raíz ≈ {self.calculated_root:.4f}')
-                        ax.axvline(x=self.calculated_root, color='m', linewidth=1.5, linestyle='--', alpha=0.6)
+                        ax.plot(self.calculated_root, f_root, marker='o', linestyle='None', markersize=10, color='#BB33FF', label=f'Raíz ≈ {self.calculated_root:.4f}')
+                        ax.axvline(x=self.calculated_root, color='#BB33FF', linewidth=1.5, linestyle='--', alpha=0.6)
                     except:
                         pass
                 ax.grid(True, linestyle='--', alpha=0.5)
@@ -2449,7 +2449,7 @@ class MatrixCalculator:
         if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str') and self.calculated_func_str == func_str:
             try:
                 fr = self.evaluate_function(self.calculated_root, func_str)
-                ax.plot(self.calculated_root, fr, marker='*', color="#BB33FF", markersize=14, label=f"Raíz ≈ {self.calculated_root:.4f}")
+                ax.plot(self.calculated_root, fr, marker='o', linestyle='None', color="#BB33FF", markersize=10, label=f"Raíz ≈ {self.calculated_root:.4f}")
                 ax.axvline(self.calculated_root, color="#BB33FF", linewidth=1.2, linestyle='--', alpha=0.7)
             except:
                 pass
@@ -2519,6 +2519,29 @@ class MatrixCalculator:
         else:
             self.fp_hover_annot.set_visible(False)
         self.fp_plot_canvas.draw_idle()
+
+    def on_bis_scroll(self, event):
+        self._zoom_on_scroll(self.bis_plot_ax, self.bis_plot_canvas, event)
+
+    def on_fp_scroll(self, event):
+        self._zoom_on_scroll(self.fp_plot_ax, self.fp_plot_canvas, event)
+
+    def on_nw_scroll(self, event):
+        self._zoom_on_scroll(self.nw_plot_ax, self.nw_plot_canvas, event)
+
+    def _zoom_on_scroll(self, ax, canvas, event):
+        if event.inaxes != ax or event.xdata is None or event.ydata is None:
+            return
+        x0, x1 = ax.get_xlim(); y0, y1 = ax.get_ylim()
+        factor = 1.2 if getattr(event, 'button', 'up') == 'up' else (1/1.2)
+        cx, cy = event.xdata, event.ydata
+        nx = (x1 - x0) / factor; ny = (y1 - y0) / factor
+        ax.set_xlim(cx - nx/2, cx + nx/2)
+        ax.set_ylim(cy - ny/2, cy + ny/2)
+        try:
+            canvas.draw_idle()
+        except:
+            pass
 
     def suggest_interval_fp(self):
         """Sugiere intervalos [a,b] del tab de Falsa Posición con cambio de signo"""
@@ -2639,6 +2662,7 @@ class MatrixCalculator:
                                                        bbox=dict(boxstyle="round", fc="#000", ec="#fff", alpha=0.6), color="#fff")
         self.nw_hover_annot.set_visible(False)
         self.nw_plot_canvas.mpl_connect('motion_notify_event', self.on_nw_motion)
+        self.nw_plot_canvas.mpl_connect('scroll_event', self.on_nw_scroll)
         expand_frame = tk.Frame(plot_frame, bg=self.colors["background"]) 
         expand_frame.pack(fill="x", pady=(0,4))
         tk.Button(expand_frame, text="⤢ Expandir", command=lambda: self.open_expanded_plot('newton'),
@@ -2707,14 +2731,20 @@ class MatrixCalculator:
         self.newton_result_text.configure(yscrollcommand=vsb.set)
         self.newton_result_text.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
+        self.newton_result_text.tag_configure("title", foreground=self.colors["accent"], font=("Consolas", 12, "bold"))
+        self.newton_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 12))
+        self.newton_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 12, "bold"))
+        self.newton_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 14, "bold"))
+        self.newton_result_text.tag_configure("warning", foreground=self.colors["accent"], font=("Consolas", 12))
         self.newton_result_text.insert("1.0", "Los resultados de Newton-Raphson se mostrarán aquí.")
         self.newton_result_text.config(state="disabled")
 
     def update_newton_preview(self):
         try:
-            disp = math_utils.format_function_display(self.nw_function_var.get().strip()) if self.nw_function_var.get().strip() else ""
+            func = self.nw_function_var.get().strip()
+            disp = self.to_mathtext(func) if func else ""
             self.nw_prev_ax.clear(); self.nw_prev_ax.axis('off');
-            self.nw_prev_ax.text(0.01, 0.5, f"f(x) = {disp}", fontsize=12, va='center')
+            self.nw_prev_ax.text(0.01, 0.5, f"$f(x) = {disp}$", fontsize=12, va='center')
             self.nw_prev_canvas.draw()
         except:
             pass
@@ -2745,8 +2775,8 @@ class MatrixCalculator:
             if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str') and self.calculated_func_str == func_str:
                 try:
                     fr = self.evaluate_function(self.calculated_root, func_str)
-                    ax.plot(self.calculated_root, fr, 'm*', markersize=15, label=f'Raíz ≈ {self.calculated_root:.4f}')
-                    ax.axvline(self.calculated_root, color='m', linewidth=1.2, linestyle='--', alpha=0.7)
+                    ax.plot(self.calculated_root, fr, marker='o', linestyle='None', markersize=10, color='#BB33FF', label=f'Raíz ≈ {self.calculated_root:.4f}')
+                    ax.axvline(self.calculated_root, color='#BB33FF', linewidth=1.2, linestyle='--', alpha=0.7)
                 except:
                     pass
             ax.grid(True, linestyle='--', alpha=0.5); ax.legend()
@@ -2770,6 +2800,8 @@ class MatrixCalculator:
             self.newton_result_text.insert(tk.END, f"MÉTODO DE NEWTON-RAPHSON\n", "title")
             self.newton_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
             self.newton_result_text.insert(tk.END, f"x0: {x}\nTolerancia: {tol}\nMáx. iteraciones: {max_it}\n\n", "step")
+            self.newton_result_text.insert(tk.END, "\nTABLA DE ITERACIONES:\n", "title")
+            self.newton_result_text.insert(tk.END, "="*80+"\n", "step")
             header = f"{'Iter':<6} {'x':>16} {'f(x)':>16} {'f\' (x)':>16} {'ea':>16}\n"
             self.newton_result_text.insert(tk.END, header, "step"); self.newton_result_text.insert(tk.END, "-"*80+"\n", "step")
             prev_x = x; iteration = 0; stopped = False
@@ -2785,19 +2817,20 @@ class MatrixCalculator:
                 if ea <= tol or abs(self.evaluate_function(next_x, func_str)) <= tol:
                     prev_x = next_x; iteration += 1; break
                 prev_x = next_x; iteration += 1
-            root = prev_x
-            self.calculated_root = root; self.calculated_func_str = func_str
             self.newton_result_text.insert(tk.END, "\n"+"="*80+"\n", "step")
-            self.newton_result_text.insert(tk.END, f"RESULTADO FINAL (Newton-Raphson):\n", "result")
-            self.newton_result_text.insert(tk.END, f"Raíz aproximada x = {root:.10f}\n", "result")
-            fr = self.evaluate_function(root, func_str)
-            self.newton_result_text.insert(tk.END, f"f({root:.10f}) = {fr:.2e}\n", "result")
             if stopped:
-                self.newton_result_text.insert(tk.END, "\n⚠ Cálculo detenido por f'(x)≈0. Intente otro x0.\n", "warning")
-            if iteration >= max_it:
-                self.newton_result_text.insert(tk.END, "\n⚠ Se alcanzó el máximo de iteraciones\n", "warning")
-            if abs(fr) > tol:
-                self.newton_result_text.insert(tk.END, "\n⚠ Aviso: |f(raíz)| es mayor que la tolerancia; podría haber convergencia lenta u oscilatoria.\n", "warning")
+                self.newton_result_text.insert(tk.END, "⚠ Cálculo detenido por f'(x)≈0. Intente otro x0.\n", "warning")
+            else:
+                root = prev_x
+                self.calculated_root = root; self.calculated_func_str = func_str
+                self.newton_result_text.insert(tk.END, f"RESULTADO FINAL (Newton-Raphson):\n", "result")
+                self.newton_result_text.insert(tk.END, f"Raíz aproximada x = {root:.10f}\n", "result")
+                fr = self.evaluate_function(root, func_str)
+                self.newton_result_text.insert(tk.END, f"f({root:.10f}) = {fr:.2e}\n", "result")
+                if iteration >= max_it:
+                    self.newton_result_text.insert(tk.END, "\n⚠ Se alcanzó el máximo de iteraciones\n", "warning")
+                if abs(fr) > tol:
+                    self.newton_result_text.insert(tk.END, "\n⚠ Aviso: |f(raíz)| es mayor que la tolerancia; podría haber convergencia lenta u oscilatoria.\n", "warning")
             self.newton_result_text.config(state="disabled")
         except ValueError as e:
             messagebox.showerror("Error", str(e))
@@ -3655,15 +3688,35 @@ IMPORTANTE:
     def evaluate_function_vectorized(self, x_array, func_str):
         return math_utils.evaluate_function_vectorized(x_array, func_str)
 
+    def to_mathtext(self, s):
+        try:
+            t = s
+            t = re.sub(r"sqrt\s*\(\s*([^()]*)\s*\)", r"\\sqrt{\1}", t)
+            t = re.sub(r"\bln\s*\(\s*([^()]*)\s*\)", r"\\ln{\1}", t)
+            t = re.sub(r"\blog\s*\(\s*([^()]*)\s*\)", r"\\log{\1}", t)
+            def exp_paren(m):
+                return f"{m.group(1)}^{{{m.group(2).strip()}}}"
+            def exp_simple(m):
+                return f"{m.group(1)}^{{{m.group(2).strip()}}}"
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*\(\s*([^()]*)\s*\)", exp_paren, t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*(-?[A-Za-z0-9\.]+)", exp_simple, t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*([A-Za-z0-9\.]+)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"(?<![A-Za-z0-9_])([\-]?[A-Za-z0-9\.]+)\s*/\s*([\-]?[A-Za-z0-9\.]+)(?![A-Za-z0-9_])", r"\\frac{\1}{\2}", t)
+            return t
+        except Exception:
+            return s
+
     def update_bisection_preview(self):
         """Renderiza una previsualización de la función en la pestaña de bisección"""
         try:
             func_str = self.function_var.get().strip()
-            disp = math_utils.format_function_display(func_str) if func_str else ""
+            disp = self.to_mathtext(func_str) if func_str else ""
             try:
                 self.bis_prev_ax.clear()
                 self.bis_prev_ax.axis('off')
-                self.bis_prev_ax.text(0.01, 0.5, f"f(x) = {disp}", fontsize=12, va='center')
+                self.bis_prev_ax.text(0.01, 0.5, f"$f(x) = {disp}$", fontsize=12, va='center')
                 self.bis_prev_canvas.draw()
             except Exception:
                 pass
@@ -3674,11 +3727,11 @@ IMPORTANTE:
         """Renderiza una previsualización de la función en la pestaña de falsa posición"""
         try:
             func_str = self.fp_function_var.get().strip()
-            disp = math_utils.format_function_display(func_str) if func_str else ""
+            disp = self.to_mathtext(func_str) if func_str else ""
             try:
                 self.fp_prev_ax.clear()
                 self.fp_prev_ax.axis('off')
-                self.fp_prev_ax.text(0.01, 0.5, f"f(x) = {disp}", fontsize=12, va='center')
+                self.fp_prev_ax.text(0.01, 0.5, f"$f(x) = {disp}$", fontsize=12, va='center')
                 self.fp_prev_canvas.draw()
             except Exception:
                 pass
