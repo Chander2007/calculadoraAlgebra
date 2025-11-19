@@ -137,6 +137,8 @@ class MatrixCalculator:
         # Pestaña de Método de Newton-Raphson
         self.newton_tab = tk.Frame(self.notebook, bg=self.colors["background"])
         self.notebook.add(self.newton_tab, text="Método de Newton-Raphson")
+        self.secant_tab = tk.Frame(self.notebook, bg=self.colors["background"])
+        self.notebook.add(self.secant_tab, text="Método de la Secante")
         
         # Configurar la pestaña de matrices
         self.setup_matrix_operations_tab()
@@ -152,6 +154,7 @@ class MatrixCalculator:
 
         # Configurar la pestaña de Newton-Raphson
         self.setup_newton_tab()
+        self.setup_secant_tab()
         
         # Vincular evento de cambio de pestaña para asegurar que el teclado funcione correctamente
         self.notebook.bind('<<NotebookTabChanged>>', self.on_tab_changed)
@@ -2311,49 +2314,61 @@ class MatrixCalculator:
             use_embedded = hasattr(self, 'fp_plot_canvas')
             if use_embedded:
                 prev_xlim = self.fp_plot_ax.get_xlim()
+                prev_ylim = self.fp_plot_ax.get_ylim()
                 restore_view = getattr(self, 'fp_plot_init_done', False)
             else:
                 restore_view = False
-            num_points = 600
             if use_embedded and restore_view:
                 x_min, x_max = prev_xlim
-                step = (x_max - x_min) / num_points
-                xs = [x_min + i * step for i in range(num_points + 1)]
             else:
-                step = (b - a) / num_points
-                xs = [a + i * step for i in range(num_points + 1)]
-            ys = []
-            valid_points = 0
-            for x in xs:
-                try:
-                    y = self.evaluate_function(x, func_str)
-                    ys.append(y)
-                    valid_points += 1
-                except Exception:
-                    ys.append(float("nan"))
+                margin = max(abs(b - a) * 0.2, 1)
+                x_min = min(a, b) - margin
+                x_max = max(a, b) + margin
+            x = np.linspace(x_min, x_max, 2000)
+            y = self.evaluate_function_vectorized(x, func_str)
+            y_plot = np.where(np.isfinite(y), y, np.nan)
 
-            if valid_points == 0:
+            if np.all(np.isnan(y_plot)):
                 messagebox.showerror("Error al graficar", "No se pudieron evaluar puntos válidos en el intervalo.")
                 return
 
             formatted_func = self.format_function_display(func_str)
             if use_embedded:
                 ax = self.fp_plot_ax
-                prev_xlim = ax.get_xlim()
-                prev_ylim = ax.get_ylim()
-                restore_view = getattr(self, 'fp_plot_init_done', False)
                 ax.clear()
-                ax.plot(xs, ys, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
+                ax.plot(x, y_plot, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
                 ax.axhline(0, color="#FF453A", linewidth=1)
                 ax.axvline(0, color="#FF9F0A", linewidth=1)
+                ax.axvline(x=a, color='g', linewidth=2, linestyle=':', alpha=0.7, label=f'a = {a:.2f}')
+                ax.axvline(x=b, color='r', linewidth=2, linestyle=':', alpha=0.7, label=f'b = {b:.2f}')
                 ax.set_title(f"Gráfica de f(x) = {formatted_func} - Falsa Posición")
                 ax.set_xlabel('x')
                 ax.set_ylabel('f(x)')
-                dy = np.gradient(np.array(ys), np.array(xs))
+                dy = np.gradient(np.nan_to_num(y_plot, nan=0.0), x)
                 vx = []; vy = []
-                for i in range(1, len(dy)):
-                    if (dy[i-1] > 0 and dy[i] <= 0) or (dy[i-1] < 0 and dy[i] >= 0):
-                        vx.append(xs[i]); vy.append(ys[i])
+                mask = np.isfinite(y_plot)
+                idx = np.where(mask)[0]
+                if len(idx) > 1:
+                    prev = idx[0]
+                    run = [prev]
+                    for i in idx[1:]:
+                        if i == prev + 1:
+                            run.append(i)
+                        else:
+                            if len(run) > 1:
+                                dr = dy[run]
+                                for j in range(1, len(dr)):
+                                    if (dr[j-1] > 0 and dr[j] <= 0) or (dr[j-1] < 0 and dr[j] >= 0):
+                                        k = run[j]
+                                        vx.append(x[k]); vy.append(y_plot[k])
+                            run = [i]
+                        prev = i
+                    if len(run) > 1:
+                        dr = dy[run]
+                        for j in range(1, len(dr)):
+                            if (dr[j-1] > 0 and dr[j] <= 0) or (dr[j-1] < 0 and dr[j] >= 0):
+                                k = run[j]
+                                vx.append(x[k]); vy.append(y_plot[k])
                 if vx:
                     ax.plot(vx, vy, marker='D', linestyle='None', color='#FF9F0A', label='Vértices')
                 self.fp_vertices = list(zip(vx, vy))
@@ -2364,14 +2379,25 @@ class MatrixCalculator:
                         ax.axvline(x=self.calculated_root, color='#BB33FF', linewidth=1.5, linestyle='--', alpha=0.6)
                     except:
                         pass
+                if not restore_view:
+                    try:
+                        p1, p99 = np.nanpercentile(y_plot, [1, 99])
+                        if not (np.isnan(p1) or np.isnan(p99)):
+                            yr = p99 - p1
+                            if yr > 0:
+                                ax.set_ylim(p1 - yr * 0.1, p99 + yr * 0.1)
+                            else:
+                                ax.set_ylim(p1 - 1, p99 + 1)
+                        ax.set_xlim(x_min, x_max)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        ax.set_xlim(prev_xlim); ax.set_ylim(prev_ylim)
+                    except Exception:
+                        pass
                 ax.grid(True, linestyle='--', alpha=0.5)
                 ax.legend()
-                # Mantener siempre la vista original si ya se había inicializado
-                try:
-                    if restore_view:
-                        ax.set_xlim(prev_xlim); ax.set_ylim(prev_ylim)
-                except:
-                    pass
                 self.fp_plot_init_done = True
                 try:
                     self.fp_plot_canvas.draw()
@@ -2383,12 +2409,25 @@ class MatrixCalculator:
                 plot_window.title(f"Gráfica de f(x) = {formatted_func}")
                 fig = Figure(figsize=(7, 4.5), dpi=100)
                 ax = fig.add_subplot(111)
-                ax.plot(xs, ys, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
+                ax.plot(x, y_plot, label=f"f(x) = {formatted_func}", color="#FFB703", linewidth=2)
                 ax.axhline(0, color="#FF453A", linewidth=1)
                 ax.axvline(0, color="#FF9F0A", linewidth=1)
+                ax.axvline(x=a, color='g', linewidth=2, linestyle=':', alpha=0.7, label=f'a = {a:.2f}')
+                ax.axvline(x=b, color='r', linewidth=2, linestyle=':', alpha=0.7, label=f'b = {b:.2f}')
                 ax.set_title(f"Gráfica de f(x) = {formatted_func} - Falsa Posición")
                 ax.set_xlabel('x')
                 ax.set_ylabel('f(x)')
+                try:
+                    p1, p99 = np.nanpercentile(y_plot, [1, 99])
+                    if not (np.isnan(p1) or np.isnan(p99)):
+                        yr = p99 - p1
+                        if yr > 0:
+                            ax.set_ylim(p1 - yr * 0.1, p99 + yr * 0.1)
+                        else:
+                            ax.set_ylim(p1 - 1, p99 + 1)
+                    ax.set_xlim(x_min, x_max)
+                except Exception:
+                    pass
                 ax.grid(True, linestyle='--', alpha=0.5)
                 ax.legend()
                 canvas = FigureCanvasTkAgg(fig, plot_window)
@@ -2400,7 +2439,14 @@ class MatrixCalculator:
             messagebox.showerror("Error", f"Error al graficar la función: {str(e)}")
 
     def open_expanded_plot(self, which):
-        func_str = self.function_var.get().strip() if which == 'bisection' else self.fp_function_var.get().strip()
+        if which == 'bisection':
+            func_str = self.function_var.get().strip()
+        elif which == 'falsepos':
+            func_str = self.fp_function_var.get().strip()
+        elif which == 'secant':
+            func_str = self.sc_function_var.get().strip()
+        else:
+            func_str = self.nw_function_var.get().strip()
         if not func_str:
             return
         win = tk.Toplevel(self.root)
@@ -2416,6 +2462,14 @@ class MatrixCalculator:
             a = float(self.fp_a_var.get()); b = float(self.fp_b_var.get())
             color_fn = None
             src_ax = self.fp_plot_ax
+        elif which == 'secant':
+            try:
+                x0 = float(self.sc_x0_var.get()); x1 = float(self.sc_x1_var.get())
+            except:
+                x0 = -5.0; x1 = 5.0
+            a = min(x0, x1); b = max(x0, x1)
+            color_fn = 'b-'
+            src_ax = self.sc_plot_ax
         else:
             # newton
             try:
@@ -2430,9 +2484,10 @@ class MatrixCalculator:
         margin = max(abs(b - a) * 0.2, 1)
         x_min = min(a, b) - margin
         x_max = max(a, b) + margin
-        x = np.linspace(x_min, x_max, 1000)
+        x = np.linspace(x_min, x_max, 2000)
         y = self.evaluate_function_vectorized(x, func_str)
-        ax.plot(x, y, color="#2F80ED" if color_fn is None else None, linestyle='-', linewidth=2)
+        y_plot = np.where(np.isfinite(y), y, np.nan)
+        ax.plot(x, y_plot, color="#2F80ED" if color_fn is None else None, linestyle='-', linewidth=2)
         # Estilo tipo GeoGebra
         ax.axhline(0, color="#666", linewidth=1.2, linestyle='--', alpha=0.7)
         ax.axvline(0, color="#666", linewidth=1.2, linestyle='--', alpha=0.7)
@@ -2543,46 +2598,84 @@ class MatrixCalculator:
         except:
             pass
 
-    def suggest_interval_fp(self):
-        """Sugiere intervalos [a,b] del tab de Falsa Posición con cambio de signo"""
-        func_str = self.fp_function_var.get().strip()
-        if not func_str:
-            messagebox.showerror("Error", "Por favor ingrese una función en 'f(x)'.")
-            return
-
+    def _suggest_interval_core(self, func_str, prefer_zero=True):
         search_specs = [(-10, 10, 0.1), (-50, 50, 0.2), (-100, 100, 0.5)]
         intervals = []
+        zeros = []
+        y_limit = 1e6
         for a_range, b_range, step in search_specs:
             prev_x, prev_y = None, None
-            x = a_range
-            while x <= b_range:
+            x = float(a_range)
+            while x <= float(b_range):
                 try:
                     y = float(self.evaluate_function(x, func_str))
-                    if prev_y is not None and not math.isnan(prev_y) and not math.isnan(y):
-                        if prev_y * y < 0:
-                            intervals.append((prev_x, x))
-                            if len(intervals) >= 8:
-                                break
+                    finite = not math.isnan(y) and math.isfinite(y)
+                    if finite and abs(y) < 1e-12:
+                        zeros.append((x, step))
+                    if prev_y is not None:
+                        finite_prev = not math.isnan(prev_y) and math.isfinite(prev_y)
+                        if finite_prev and finite and abs(prev_y) < y_limit and abs(y) < y_limit:
+                            if prev_y * y < 0:
+                                intervals.append((prev_x, x))
+                                if len(intervals) >= 32:
+                                    break
                     prev_x, prev_y = x, y
                 except Exception:
                     prev_x, prev_y = None, None
                 x = round(x + step, 10)
-            if intervals:
+            if intervals or zeros:
                 break
+        if not intervals and not zeros:
+            return None, None, [], []
+        if zeros and prefer_zero:
+            zx, st = sorted(zeros, key=lambda t: abs(t[0]))[0]
+            a, b = zx - st, zx + st
+        else:
+            def score(ab):
+                try:
+                    fa = float(self.evaluate_function(ab[0], func_str))
+                    fb = float(self.evaluate_function(ab[1], func_str))
+                    val = (min(abs(ab[0]), abs(ab[1])), abs(fa) + abs(fb))
+                except Exception:
+                    val = (min(abs(ab[0]), abs(ab[1])), float('inf'))
+                return val
+            a, b = sorted(intervals, key=score)[0]
+        try:
+            fa = float(self.evaluate_function(a, func_str)); fb = float(self.evaluate_function(b, func_str))
+        except Exception:
+            fa, fb = float('nan'), float('nan')
+        if not (not math.isnan(fa) and not math.isnan(fb) and math.isfinite(fa) and math.isfinite(fb) and fa*fb < 0):
+            cx = 0.0 if (zeros and prefer_zero) else ((a + b) / 2.0)
+            step = 0.1
+            for k in range(1, 51):
+                a2, b2 = cx - k*step, cx + k*step
+                try:
+                    fa2 = float(self.evaluate_function(a2, func_str)); fb2 = float(self.evaluate_function(b2, func_str))
+                    if (not math.isnan(fa2) and not math.isnan(fb2) and math.isfinite(fa2) and math.isfinite(fb2) and fa2*fb2 < 0 and abs(fa2) < y_limit and abs(fb2) < y_limit):
+                        a, b = a2, b2
+                        break
+                except Exception:
+                    pass
+        return a, b, intervals, zeros
 
-        if not intervals:
-            messagebox.showwarning("Sin cambio de signo",
-                                   "No se encontraron intervalos con cambio de signo en los rangos probados.")
+    def suggest_interval_fp(self):
+        func_str = self.fp_function_var.get().strip()
+        if not func_str:
+            messagebox.showerror("Error", "Por favor ingrese una función en 'f(x)'.")
             return
-
-        a, b = intervals[0]
-        self.fp_a_var.set(f"{a:.6f}")
-        self.fp_b_var.set(f"{b:.6f}")
-
+        a, b, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+        if a is None:
+            messagebox.showwarning("Sin cambio de signo", "No se encontraron intervalos con cambio de signo en los rangos probados.")
+            return
+        self.fp_a_var.set(f"{a:.6f}"); self.fp_b_var.set(f"{b:.6f}")
         txt = "Intervalos con cambio de signo detectados:\n\n"
         for i, (ia, ib) in enumerate(intervals, 1):
             txt += f"{i}. [{ia:.6f}, {ib:.6f}]\n"
-        txt += "\nSe asignó el primero en los campos 'a' y 'b'."
+        if zeros:
+            txt += "\nRaíces exactas detectadas en muestreo:\n"
+            for i, (zx, st) in enumerate(sorted(zeros, key=lambda t: abs(t[0])), 1):
+                txt += f"{i}. x = {zx:.6f} (intervalo sugerido [{zx-st:.6f}, {zx+st:.6f}])\n"
+        txt += "\nSe asignó el intervalo más cercano a 0."
         messagebox.showinfo("Sugerencia de Intervalos", txt)
 
     def derivative_numeric(self, x, func_str, h=1e-6):
@@ -2707,14 +2800,13 @@ class MatrixCalculator:
         tk.Button(btn_frame, text="🗑 Limpiar", command=self.clear_newton,
                   bg=self.colors["button_secondary"], fg="white", **button_style).pack(side="left", padx=(0,8))
         tk.Button(btn_frame, text="📊 Graficar Función", command=self.plot_function_newton,
-                  bg="#20B2AA", fg="white", **button_style).pack(side="left", padx=(0,8))
+                  bg="#7B68EE", fg="white", **button_style).pack(side="left", padx=(0,8))
         tk.Button(btn_frame, text="🔎 Sugerir Intervalo", command=self.suggest_interval_nw,
                   bg="#20B2AA", fg="white", **button_style).pack(side="left", padx=(0,8))
 
-        # Teclado virtual igual que otras pestañas, centrado bajo los botones
-        self.nw_keyboard_frame = tk.Frame(main_frame, bg=self.colors["matrix_bg"], relief="flat", bd=1)
         self.nw_btn_frame = btn_frame
-        self.nw_keyboard_frame.place(in_=btn_frame, relx=0.5, rely=1.06, anchor="n")
+        self.nw_keyboard_frame = tk.Frame(main_frame, bg=self.colors["matrix_bg"], relief="flat", bd=1)
+        self.nw_keyboard_frame.place(in_=self.nw_btn_frame, relx=0.5, rely=1.06, anchor="n")
         self.nw_keyboard_visible = True
         self.setup_virtual_keyboard_nw()
 
@@ -2738,6 +2830,401 @@ class MatrixCalculator:
         self.newton_result_text.tag_configure("warning", foreground=self.colors["accent"], font=("Consolas", 12))
         self.newton_result_text.insert("1.0", "Los resultados de Newton-Raphson se mostrarán aquí.")
         self.newton_result_text.config(state="disabled")
+
+    def setup_secant_tab(self):
+        border_frame = tk.Frame(self.secant_tab, bg="#8A2BE2", relief="flat", bd=1)
+        border_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        main_frame = tk.Frame(border_frame, bg=self.colors["background"])
+        main_frame.pack(fill="both", expand=True, padx=12, pady=12)
+        tk.Label(main_frame, text="Método de la Secante", font=("Segoe UI", 24, "bold"),
+                 bg=self.colors["background"], fg=self.colors["accent"]).pack(pady=(0,20))
+        top_frame = tk.Frame(main_frame, bg=self.colors["background"]) 
+        top_frame.pack(pady=(0, 15), fill="x")
+        func_frame = tk.Frame(top_frame, bg=self.colors["background"]) 
+        func_frame.pack(fill="x", pady=(0, 10))
+        tk.Label(func_frame, text="Función f(x):", font=("Segoe UI", 12, "bold"),
+                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0,5))
+        func_input_frame = tk.Frame(func_frame, bg=self.colors["background"]) 
+        func_input_frame.pack(fill="x")
+        self.sc_function_var = tk.StringVar()
+        self.sc_function_entry = tk.Entry(func_input_frame, textvariable=self.sc_function_var,
+                          font=("Segoe UI", 12), width=40,
+                          bg=self.colors["entry_bg"], fg=self.colors["text"],
+                          insertbackground=self.colors["text"], relief="flat", bd=1)
+        self.sc_function_entry.pack(side="left", padx=(0,10))
+        self.sc_keyboard_btn = tk.Button(func_input_frame, text="🔽 Ocultar Teclado",
+                                         command=self.toggle_keyboard_sc,
+                                         bg=self.colors["button_secondary"], fg="white",
+                                         font=("Segoe UI", 11, "bold"), relief="flat", bd=0,
+                                         padx=15, pady=6, cursor="hand2",
+                                         activebackground=self.colors["accent"],
+                                         activeforeground="white")
+        self.sc_keyboard_btn.pack(side="left", padx=(0,5))
+        right_frame = tk.Frame(top_frame, bg=self.colors["background"]) 
+        right_frame.pack(side="right", fill="both", expand=True, padx=(10,0))
+        prev_frame = tk.Frame(right_frame, bg=self.colors["secondary_bg"], relief="flat", bd=1)
+        prev_frame.pack(fill="x", pady=(0,8))
+        tk.Label(prev_frame, text="Previsualización:", font=("Segoe UI", 10, "bold"),
+                 bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
+        self.sc_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.sc_prev_ax = self.sc_preview_fig.add_subplot(111)
+        self.sc_prev_ax.axis('off')
+        self.sc_prev_canvas = FigureCanvasTkAgg(self.sc_preview_fig, prev_frame)
+        self.sc_prev_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
+        self.sc_function_entry.bind('<KeyRelease>', lambda e: self.update_secant_preview())
+        self.update_secant_preview()
+        plot_frame = tk.Frame(right_frame, bg=self.colors["background"]) 
+        plot_frame.pack(fill="both", expand=True)
+        self.sc_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.sc_plot_ax = self.sc_plot_fig.add_subplot(111)
+        self.sc_plot_canvas = FigureCanvasTkAgg(self.sc_plot_fig, plot_frame)
+        self.sc_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
+        self.sc_toolbar = NavigationToolbar2Tk(self.sc_plot_canvas, plot_frame)
+        self.sc_toolbar.update()
+        self.sc_plot_ax.format_coord = lambda x, y: ""
+        self.sc_hover_annot = self.sc_plot_ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points",
+                                                       bbox=dict(boxstyle="round", fc="#000", ec="#fff", alpha=0.6), color="#fff")
+        self.sc_hover_annot.set_visible(False)
+        self.sc_plot_canvas.mpl_connect('motion_notify_event', self.on_sc_motion)
+        self.sc_plot_canvas.mpl_connect('scroll_event', self.on_sc_scroll)
+        expand_frame = tk.Frame(plot_frame, bg=self.colors["background"]) 
+        expand_frame.pack(fill="x", pady=(0,4))
+        tk.Button(expand_frame, text="⤢ Expandir", command=lambda: self.open_expanded_plot('secant'),
+                  bg=self.colors["accent"], fg=self.colors["text"], relief="flat").pack(side="right")
+        params_frame = tk.Frame(top_frame, bg=self.colors["background"]) 
+        params_frame.pack(fill="x", pady=(10,0))
+        x0_frame = tk.Frame(params_frame, bg=self.colors["background"]) 
+        x0_frame.pack(side="left", padx=(0,20))
+        tk.Label(x0_frame, text="x0:", font=("Segoe UI", 12, "bold"),
+                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0,5))
+        self.sc_x0_var = tk.StringVar(value="0.0")
+        tk.Entry(x0_frame, textvariable=self.sc_x0_var, width=12,
+                 font=("Segoe UI", 11), bg=self.colors["entry_bg"], fg=self.colors["text"],
+                 insertbackground=self.colors["text"], relief="flat", bd=1).pack()
+        x1_frame = tk.Frame(params_frame, bg=self.colors["background"]) 
+        x1_frame.pack(side="left", padx=(0,20))
+        tk.Label(x1_frame, text="x1:", font=("Segoe UI", 12, "bold"),
+                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0,5))
+        self.sc_x1_var = tk.StringVar(value="1.0")
+        tk.Entry(x1_frame, textvariable=self.sc_x1_var, width=12,
+                 font=("Segoe UI", 11), bg=self.colors["entry_bg"], fg=self.colors["text"],
+                 insertbackground=self.colors["text"], relief="flat", bd=1).pack()
+        tol_frame = tk.Frame(params_frame, bg=self.colors["background"]) 
+        tol_frame.pack(side="left", padx=(0,20))
+        tk.Label(tol_frame, text="Tolerancia:", font=("Segoe UI", 12, "bold"),
+                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0,5))
+        self.sc_tol_var = tk.StringVar(value="0.0001")
+        tk.Entry(tol_frame, textvariable=self.sc_tol_var, width=12,
+                 font=("Segoe UI", 11), bg=self.colors["entry_bg"], fg=self.colors["text"],
+                 insertbackground=self.colors["text"], relief="flat", bd=1).pack()
+        iter_frame = tk.Frame(params_frame, bg=self.colors["background"]) 
+        iter_frame.pack(side="left")
+        tk.Label(iter_frame, text="Máx. iteraciones:", font=("Segoe UI", 12, "bold"),
+                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0,5))
+        self.sc_max_iter_var = tk.StringVar(value="100")
+        tk.Entry(iter_frame, textvariable=self.sc_max_iter_var, width=10,
+                 font=("Segoe UI", 11), bg=self.colors["entry_bg"], fg=self.colors["text"],
+                 insertbackground=self.colors["text"], relief="flat", bd=1).pack()
+        btn_frame = tk.Frame(top_frame, bg=self.colors["background"]) 
+        btn_frame.pack(pady=(8, 0))
+        button_style = {"font": ("Segoe UI", 11, "bold"), "relief": "flat", "bd": 0, "padx": 22, "pady": 10, "cursor": "hand2", "activebackground": self.colors["accent"], "activeforeground": "white"}
+        tk.Button(btn_frame, text="🔢 Calcular Raíz", command=self.calculate_secant,
+                  bg=self.colors["accent"], fg="white", **button_style).pack(side="left", padx=(0, 8))
+        tk.Button(btn_frame, text="🗑 Limpiar", command=self.clear_secant,
+                  bg=self.colors["button_secondary"], fg="white", **button_style).pack(side="left", padx=(0, 8))
+        tk.Button(btn_frame, text="📊 Graficar Función", command=self.plot_function_sc,
+                  bg="#7B68EE", fg="white", **button_style).pack(side="left", padx=(0, 8))
+        tk.Button(btn_frame, text="🔎 Sugerir Intervalo", command=self.suggest_interval_sc,
+                  bg="#20B2AA", fg="white", **button_style).pack(side="left", padx=(0, 8))
+        self.sc_btn_frame = btn_frame
+        self.sc_keyboard_frame = tk.Frame(main_frame, bg=self.colors["matrix_bg"], relief="flat", bd=1)
+        self.sc_keyboard_frame.place(in_=self.sc_btn_frame, relx=0.5, rely=1.06, anchor="n")
+        self.sc_keyboard_visible = True
+        self.setup_virtual_keyboard_sc()
+        self.sc_result_frame = tk.Frame(main_frame, bg=self.colors["background"]) 
+        self.sc_result_frame.pack(fill="both", expand=True, pady=(15, 0))
+        tk.Label(self.sc_result_frame, text="Resultados:", font=("Segoe UI", 14, "bold"),
+                 bg=self.colors["background"], fg=self.colors["text"]).pack(anchor="w", pady=(0, 10))
+        sc_results_container = tk.Frame(self.sc_result_frame, bg=self.colors["background"]) 
+        sc_results_container.pack(fill="both", expand=True)
+        self.secant_result_text = tk.Text(sc_results_container, width=100, height=28, font=("Consolas", 14),
+                            bg=self.colors["secondary_bg"], fg=self.colors["text"],
+                            insertbackground=self.colors["text"], relief="flat", bd=1, wrap="none")
+        sc_vsb = tk.Scrollbar(sc_results_container, orient="vertical", command=self.secant_result_text.yview)
+        self.secant_result_text.configure(yscrollcommand=sc_vsb.set)
+        sc_vsb.pack(side="right", fill="y")
+        self.secant_result_text.pack(side="left", fill="both", expand=True)
+        self.secant_result_text.tag_configure("title", foreground=self.colors["accent"], font=("Consolas", 12, "bold"))
+        self.secant_result_text.tag_configure("step", foreground="#30D158", font=("Consolas", 12))
+        self.secant_result_text.tag_configure("error", foreground="#FF453A", font=("Consolas", 12, "bold"))
+        self.secant_result_text.tag_configure("result", foreground="#30D158", font=("Consolas", 14, "bold"))
+        self.secant_result_text.tag_configure("warning", foreground="#FF9F0A", font=("Consolas", 12))
+        self.secant_result_text.insert("1.0", "Los resultados del método de la Secante se mostrarán aquí.")
+        self.secant_result_text.config(state="disabled")
+
+    def clear_secant(self):
+        self.sc_function_var.set(""); self.sc_x0_var.set("0.0"); self.sc_x1_var.set("1.0"); self.sc_tol_var.set("0.0001"); self.sc_max_iter_var.set("100")
+        self.secant_result_text.config(state="normal"); self.secant_result_text.delete("1.0", tk.END)
+        self.secant_result_text.insert("1.0", "Los resultados del método de la Secante se mostrarán aquí.")
+        self.secant_result_text.config(state="disabled")
+
+    def plot_function_sc(self):
+        try:
+            func_str = self.sc_function_var.get().strip()
+            if not func_str:
+                messagebox.showerror("Error", "Por favor ingrese una función")
+                return
+            try:
+                a = float(self.sc_x0_var.get()); b = float(self.sc_x1_var.get())
+            except ValueError:
+                messagebox.showerror("Error", "x0/x1 inválidos. Ingrese números válidos.")
+                return
+            use_embedded = hasattr(self, 'sc_plot_canvas')
+            if use_embedded:
+                prev_xlim = self.sc_plot_ax.get_xlim(); prev_ylim = self.sc_plot_ax.get_ylim(); restore_view = getattr(self, 'sc_plot_init_done', False)
+            else:
+                restore_view = False
+            if use_embedded and restore_view:
+                x_min, x_max = prev_xlim
+            else:
+                margin = max(abs(b - a) * 0.2, 1)
+                x_min = min(a, b) - margin
+                x_max = max(a, b) + margin
+            x = np.linspace(x_min, x_max, 2000)
+            y = self.evaluate_function_vectorized(x, func_str)
+            y_plot = np.where(np.isfinite(y), y, np.nan)
+            if np.all(np.isnan(y_plot)):
+                messagebox.showerror("Error al graficar", "No se pudieron evaluar puntos válidos en el intervalo.")
+                return
+            formatted_func = self.format_function_display(func_str)
+            ax = self.sc_plot_ax
+            ax.clear()
+            ax.plot(x, y_plot, label=f"f(x) = {formatted_func}", color="#7B68EE", linewidth=2)
+            ax.axhline(0, color="#FF453A", linewidth=1)
+            ax.axvline(0, color="#FF9F0A", linewidth=1)
+            ax.axvline(x=a, color='g', linewidth=2, linestyle=':', alpha=0.7, label=f'x0 = {a:.2f}')
+            ax.axvline(x=b, color='r', linewidth=2, linestyle=':', alpha=0.7, label=f'x1 = {b:.2f}')
+            ax.set_title(f"Gráfica de f(x) = {formatted_func} - Secante")
+            ax.set_xlabel('x'); ax.set_ylabel('f(x)')
+            dy = np.gradient(np.nan_to_num(y_plot, nan=0.0), x)
+            vx = []; vy = []
+            mask = np.isfinite(y_plot)
+            idx = np.where(mask)[0]
+            if len(idx) > 1:
+                prev = idx[0]
+                run = [prev]
+                for i in idx[1:]:
+                    if i == prev + 1:
+                        run.append(i)
+                    else:
+                        if len(run) > 1:
+                            dr = dy[run]
+                            for j in range(1, len(dr)):
+                                if (dr[j-1] > 0 and dr[j] <= 0) or (dr[j-1] < 0 and dr[j] >= 0):
+                                    k = run[j]
+                                    vx.append(x[k]); vy.append(y_plot[k])
+                        run = [i]
+                    prev = i
+                if len(run) > 1:
+                    dr = dy[run]
+                    for j in range(1, len(dr)):
+                        if (dr[j-1] > 0 and dr[j] <= 0) or (dr[j-1] < 0 and dr[j] >= 0):
+                            k = run[j]
+                            vx.append(x[k]); vy.append(y_plot[k])
+            if vx:
+                ax.plot(vx, vy, marker='D', linestyle='None', color='#FF9F0A', label='Vértices')
+            self.sc_vertices = list(zip(vx, vy))
+            try:
+                p1, p99 = np.nanpercentile(y_plot, [1, 99])
+                if not (np.isnan(p1) or np.isnan(p99)):
+                    yr = p99 - p1
+                    if yr > 0:
+                        ax.set_ylim(p1 - yr * 0.1, p99 + yr * 0.1)
+                    else:
+                        ax.set_ylim(p1 - 1, p99 + 1)
+                ax.set_xlim(x_min, x_max)
+            except Exception:
+                pass
+            if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str') and self.calculated_func_str == func_str:
+                try:
+                    f_root = self.evaluate_function(self.calculated_root, func_str)
+                    ax.plot(self.calculated_root, f_root, marker='o', linestyle='None', markersize=10, color='#BB33FF', label=f'Raíz ≈ {self.calculated_root:.4f}')
+                    ax.axvline(x=self.calculated_root, color='#BB33FF', linewidth=1.5, linestyle='--', alpha=0.6)
+                except:
+                    pass
+            ax.grid(True, linestyle='--', alpha=0.5); ax.legend(); self.sc_plot_init_done = True; self.sc_plot_canvas.draw()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al graficar: {str(e)}")
+
+    def on_sc_motion(self, event):
+        ax = self.sc_plot_ax
+        if event.inaxes != ax or event.xdata is None or event.ydata is None:
+            self.sc_hover_annot.set_visible(False); self.sc_plot_canvas.draw_idle(); return
+        xr = ax.get_xlim(); yr = ax.get_ylim()
+        tolx = (xr[1]-xr[0])*0.02; toly = (yr[1]-yr[0])*0.02
+        show = False; text = ""; xy = (event.xdata, event.ydata)
+        if hasattr(self, 'calculated_root') and hasattr(self, 'calculated_func_str') and self.calculated_func_str == self.sc_function_var.get().strip():
+            try:
+                fr = self.evaluate_function(self.calculated_root, self.sc_function_var.get().strip())
+                if abs(event.xdata - self.calculated_root) <= tolx and abs(event.ydata - fr) <= toly:
+                    show = True; text = f"raíz ≈ {self.calculated_root:.6f}"; xy = (self.calculated_root, fr)
+            except:
+                pass
+        if not show and hasattr(self, 'sc_vertices'):
+            for vx, vy in self.sc_vertices:
+                if abs(event.xdata - vx) <= tolx and abs(event.ydata - vy) <= toly:
+                    show = True; text = f"vértice ({vx:.4f}, {vy:.4f})"; xy = (vx, vy); break
+        if show:
+            self.sc_hover_annot.xy = xy; self.sc_hover_annot.set_text(text); self.sc_hover_annot.set_visible(True)
+        else:
+            self.sc_hover_annot.set_visible(False)
+        self.sc_plot_canvas.draw_idle()
+
+    def suggest_interval_sc(self):
+        func_str = self.sc_function_var.get().strip()
+        if not func_str:
+            messagebox.showerror("Error", "Por favor ingrese una función en 'f(x)'.")
+            return
+        a, b, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+        if a is None:
+            messagebox.showwarning("Sin cambio de signo", "No se encontraron intervalos con cambio de signo en los rangos probados.")
+            return
+        self.sc_x0_var.set(f"{a:.6f}"); self.sc_x1_var.set(f"{b:.6f}")
+        txt = "Intervalos con cambio de signo detectados:\n\n"
+        for i, (ia, ib) in enumerate(intervals, 1):
+            txt += f"{i}. [{ia:.6f}, {ib:.6f}]\n"
+        if zeros:
+            txt += "\nRaíces exactas detectadas en muestreo:\n"
+            for i, (zx, st) in enumerate(sorted(zeros, key=lambda t: abs(t[0])), 1):
+                txt += f"{i}. x = {zx:.6f} (intervalo sugerido [{zx-st:.6f}, {zx+st:.6f}])\n"
+        txt += "\nSe asignó el intervalo más cercano a 0."
+        messagebox.showinfo("Sugerencia de Intervalos", txt)
+
+    def setup_virtual_keyboard_sc(self):
+        func_frame = tk.Frame(self.sc_keyboard_frame, bg=self.colors["matrix_bg"])
+        func_frame.pack(pady=15, padx=10)
+        tk.Label(func_frame, text="Funciones Matemáticas:", font=("Segoe UI", 13, "bold"),
+                 bg=self.colors["matrix_bg"], fg=self.colors["accent"]).pack(pady=(0,15))
+        buttons_frame = tk.Frame(func_frame, bg=self.colors["matrix_bg"])
+        buttons_frame.pack()
+        functions = [
+            ("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"),
+            ("ln(x)", "ln(x)"), ("log(x)", "log(x)"), ("sqrt(x)", "sqrt(x)"),
+            ("x²", "x^2"), ("x³", "x^3"), ("1/x", "1/x"),
+            ("x", "x"), ("π", "pi"), ("e", "e"),
+            ("+", "+"), ("-", "-"), ("×", "*"), ("/", "/"),
+            ("(", "("), (")", ")"), ("^", "^")
+        ]
+        button_style_normal = {"font": ("Segoe UI", 11, "bold"), "relief": "flat", "bd": 0, "padx": 12, "pady": 8,
+                               "cursor": "hand2", "activebackground": self.colors["accent"], "activeforeground": "white"}
+        button_style_operator = {"font": ("Segoe UI", 12, "bold"), "relief": "flat", "bd": 0, "padx": 14, "pady": 8,
+                                  "cursor": "hand2", "activebackground": self.colors["accent"], "activeforeground": "white"}
+        for i, (text, value) in enumerate(functions):
+            row = i // 6; col = i % 6
+            if text in ["+", "-", "×", "/", "^"]: bg_color = self.colors["accent"]; style = button_style_operator
+            elif text in ["sin(x)", "cos(x)", "tan(x)", "ln(x)", "log(x)", "sqrt(x)"]: bg_color = "#4A90E2"; style = button_style_normal
+            elif text in ["x²", "x³", "1/x", "x"]: bg_color = "#7B68EE"; style = button_style_normal
+            elif text in ["π", "e"]: bg_color = "#20B2AA"; style = button_style_normal
+            else: bg_color = self.colors["button_secondary"]; style = button_style_normal
+            btn = tk.Button(buttons_frame, text=text, command=lambda v=value: self.insert_function_sc(v), bg=bg_color, fg="white", **style)
+            btn.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
+            def on_enter(e, btn=btn, original_bg=bg_color): btn.config(bg=self.colors["accent"]) 
+            def on_leave(e, btn=btn, original_bg=bg_color): btn.config(bg=original_bg)
+            btn.bind("<Enter>", on_enter); btn.bind("<Leave>", on_leave)
+        for col in range(6): buttons_frame.grid_columnconfigure(col, weight=1, uniform="buttons")
+        clear_btn = tk.Button(buttons_frame, text="🗑 Borrar", command=self.clear_function_entry_sc,
+                              bg="#FF453A", fg="white", font=("Segoe UI", 11, "bold"), relief="flat", bd=0,
+                              padx=12, pady=8, cursor="hand2", activebackground="#FF6B6B", activeforeground="white")
+        clear_btn.grid(row=len(functions)//6, column=5, padx=3, pady=3, sticky="nsew")
+        def on_enter_clear(e): clear_btn.config(bg="#FF6B6B")
+        def on_leave_clear(e): clear_btn.config(bg="#FF453A")
+        clear_btn.bind("<Enter>", on_enter_clear); clear_btn.bind("<Leave>", on_leave_clear)
+
+    def insert_function_sc(self, value):
+        current = self.sc_function_var.get(); cursor_pos = self.sc_function_entry.index(tk.INSERT)
+        if value == "pi": value = "π"
+        elif value == "e": value = "e"
+        new_value = current[:cursor_pos] + value + current[cursor_pos:]
+        self.sc_function_var.set(new_value); self.sc_function_entry.icursor(cursor_pos + len(value)); self.sc_function_entry.focus()
+
+    def clear_function_entry_sc(self):
+        self.sc_function_var.set(""); self.sc_function_entry.focus()
+
+    def toggle_keyboard_sc(self):
+        try:
+            if self.sc_keyboard_visible:
+                self.sc_keyboard_frame.place_forget()
+                self.sc_keyboard_visible = False
+                self.sc_keyboard_btn.config(text="⌨ Mostrar Teclado")
+            else:
+                self.sc_keyboard_frame.place(in_=self.sc_btn_frame, relx=0.5, rely=1.06, anchor="n")
+                self.sc_keyboard_visible = True
+                self.sc_keyboard_btn.config(text="🔽 Ocultar Teclado")
+                self.sc_keyboard_frame.update_idletasks()
+                self.secant_tab.update_idletasks()
+        except:
+            pass
+
+    def update_secant_preview(self):
+        try:
+            func_str = self.sc_function_var.get().strip()
+            disp = self.to_mathtext(func_str) if func_str else ""
+            try:
+                self.sc_prev_ax.clear(); self.sc_prev_ax.axis('off'); self.sc_prev_ax.text(0.01, 0.5, f"$f(x) = {disp}$", fontsize=12, va='center'); self.sc_prev_canvas.draw()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def on_sc_scroll(self, event):
+        self._zoom_on_scroll(self.sc_plot_ax, self.sc_plot_canvas, event)
+
+    def calculate_secant(self):
+        try:
+            func_str = self.sc_function_var.get().strip()
+            if not func_str:
+                messagebox.showerror("Error", "Por favor ingrese una función")
+                return
+            x0 = float(self.sc_x0_var.get()); x1 = float(self.sc_x1_var.get()); tol = float(self.sc_tol_var.get()); max_it = int(self.sc_max_iter_var.get())
+            self.secant_result_text.config(state="normal"); self.secant_result_text.delete("1.0", tk.END)
+            formatted_func = self.format_function_display(func_str)
+            self.secant_result_text.insert(tk.END, f"MÉTODO DE LA SECANTE\n", "title")
+            self.secant_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
+            self.secant_result_text.insert(tk.END, f"x0: {x0}\nx1: {x1}\nTolerancia: {tol}\nMáx. iteraciones: {max_it}\n\n", "step")
+            self.secant_result_text.insert(tk.END, "\nTABLA DE ITERACIONES:\n", "title")
+            self.secant_result_text.insert(tk.END, "="*80+"\n", "step")
+            header = f"{'Iter':<6} {'x0':>16} {'x1':>16} {'x2':>16} {'f(x1)':>16} {'ea':>16}\n"
+            self.secant_result_text.insert(tk.END, header, "step"); self.secant_result_text.insert(tk.END, "-"*80+"\n", "step")
+            iteration = 0; prev_x1 = x1; stopped = False
+            while iteration < max_it:
+                fx0 = self.evaluate_function(x0, func_str); fx1 = self.evaluate_function(x1, func_str)
+                if abs(fx1 - fx0) < 1e-12:
+                    self.secant_result_text.insert(tk.END, "⚠ División por cero en la fórmula de secante\n", "warning"); break
+                x2 = x1 - fx1 * (x1 - x0) / (fx1 - fx0)
+                ea = abs(x2 - x1)
+                row = f"{iteration+1:<6} {x0:>16.8f} {x1:>16.8f} {x2:>16.8f} {fx1:>16.8f} {ea:>16.8f}\n"
+                self.secant_result_text.insert(tk.END, row, "matrix")
+                if abs(fx1) <= tol or ea <= tol:
+                    x1 = x2; prev_x1 = x1; iteration += 1; stopped = True; break
+                x0, x1 = x1, x2
+                prev_x1 = x1
+                iteration += 1
+            root = prev_x1
+            self.calculated_root = root; self.calculated_func_str = func_str
+            self.secant_result_text.insert(tk.END, "="*80+"\n\n", "step")
+            self.secant_result_text.insert(tk.END, "RESULTADO FINAL (Secante):\n", "result")
+            self.secant_result_text.insert(tk.END, f"La raiz aproximada es x = {root:.8f}\n", "result")
+            self.secant_result_text.insert(tk.END, f"f({root:.8f}) = {self.evaluate_function(root, func_str):.2e}\n", "result")
+            self.secant_result_text.insert(tk.END, f"Converge en {iteration} iteraciones\n", "result")
+            try:
+                self.secant_result_text.see(tk.END)
+            except Exception:
+                pass
+            self.secant_result_text.config(state="disabled")
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Error en Secante: {str(e)}")
 
     def update_newton_preview(self):
         try:
@@ -2848,35 +3335,20 @@ class MatrixCalculator:
         if not func_str:
             messagebox.showerror("Error", "Por favor ingrese una función en 'f(x)'.")
             return
-        search_specs = [(-10, 10, 0.1), (-50, 50, 0.2), (-100, 100, 0.5)]
-        intervals = []
-        for a_range, b_range, step in search_specs:
-            prev_x, prev_y = None, None
-            x = a_range
-            while x <= b_range:
-                try:
-                    y = float(self.evaluate_function(x, func_str))
-                    if prev_y is not None and not math.isnan(prev_y) and not math.isnan(y):
-                        if prev_y * y < 0:
-                            intervals.append((prev_x, x))
-                            if len(intervals) >= 8:
-                                break
-                    prev_x, prev_y = x, y
-                except Exception:
-                    prev_x, prev_y = None, None
-                x = round(x + step, 10)
-            if intervals:
-                break
-        if not intervals:
+        a, b, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+        if a is None:
             messagebox.showwarning("Sin cambio de signo", "No se encontraron intervalos con cambio de signo en los rangos probados.")
             return
-        a, b = intervals[0]
         mid = (a + b) / 2.0
         self.nw_x0_var.set(f"{mid:.6f}")
         txt = "Intervalos con cambio de signo detectados:\n\n"
         for i, (ia, ib) in enumerate(intervals, 1):
             txt += f"{i}. [{ia:.6f}, {ib:.6f}]\n"
-        txt += f"\nSe asignó x0 = {mid:.6f} (punto medio del primer intervalo)."
+        if zeros:
+            txt += "\nRaíces exactas detectadas en muestreo:\n"
+            for i, (zx, st) in enumerate(sorted(zeros, key=lambda t: abs(t[0])), 1):
+                txt += f"{i}. x = {zx:.6f} (intervalo sugerido [{zx-st:.6f}, {zx+st:.6f}])\n"
+        txt += f"\nSe asignó x0 = {mid:.6f} (punto medio del intervalo más cercano a 0)."
         messagebox.showinfo("Sugerencia de Intervalos", txt)
 
     def setup_virtual_keyboard_nw(self):
@@ -3392,6 +3864,7 @@ class MatrixCalculator:
             
             # Aplicar el método de bisección
             iteration = 0
+            prev_c = None
             while (b - a) / 2 > tolerance and iteration < max_iterations:
                 c = (a + b) / 2
                 fc = self.evaluate_function(c, func_str)
@@ -3401,6 +3874,11 @@ class MatrixCalculator:
                 row = f"{iteration+1:<6} {a:>14.8f} {b:>14.8f} {c:>14.8f} {fa:>14.8f} {fb:>14.8f} {fc:>14.8f} {error:>14.8f}\n"
                 self.bisection_result_text.insert(tk.END, row, "matrix")
 
+                # Parada por valor de función: raíz encontrada o suficientemente cercana
+                if abs(fc) <= tolerance or fc == 0.0:
+                    prev_c = c
+                    iteration += 1
+                    break
                 # Determinar el nuevo intervalo
                 if fa * fc < 0:
                     b = c
@@ -3415,7 +3893,7 @@ class MatrixCalculator:
             self.bisection_result_text.insert(tk.END, "=" * 95 + "\n\n", "step")
             
             # Resultado final
-            root = (a + b) / 2
+            root = prev_c if prev_c is not None else (a + b) / 2
             # Guardar la raíz calculada para mostrarla en la gráfica
             self.calculated_root = root
             self.calculated_func_str = func_str
@@ -3575,56 +4053,24 @@ class MatrixCalculator:
         self.bisection_result_text.config(state="disabled")
 
     def suggest_interval(self):
-        """Busca intervalos [a,b] donde f(a)*f(b) < 0 con muestreo afinado."""
         func_str = self.function_var.get().strip()
         if not func_str:
             messagebox.showerror("Error", "Por favor ingrese una función en 'f(x)'.")
             return
-
-        # Rango y pasos más finos
-        search_specs = [
-            (-10, 10, 0.1),
-            (-50, 50, 0.2),
-            (-100, 100, 0.5),
-        ]
-
-        intervals = []
-        for a_range, b_range, step in search_specs:
-            prev_x, prev_y = None, None
-            x = float(a_range)
-            while x <= float(b_range):
-                try:
-                    y = float(self.evaluate_function(x, func_str))
-                    if prev_y is not None and not math.isnan(prev_y) and not math.isnan(y):
-                        if prev_y * y < 0:
-                            intervals.append((prev_x, x))
-                            if len(intervals) >= 8:
-                                break
-                    prev_x, prev_y = x, y
-                except Exception:
-                    prev_x, prev_y = None, None
-                x = round(x + step, 10)  # evitar acumulación de flotantes
-            if intervals:
-                break
-
-        if not intervals:
-            messagebox.showwarning(
-                "Sin cambio de signo",
-                "No se encontraron intervalos con cambio de signo en los rangos probados.\n"
-                "Prueba ajustar manualmente el intervalo o revisar la función."
-            )
+        a, b, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+        if a is None:
+            messagebox.showwarning("Sin cambio de signo", "No se encontraron intervalos con cambio de signo en los rangos probados.")
             return
-
-        # Asignar el primero y mostrar lista
-        a, b = intervals[0]
         self.a_var.set(f"{a:.6f}")
         self.b_var.set(f"{b:.6f}")
-
         txt = "Intervalos con cambio de signo detectados:\n\n"
         for i, (ia, ib) in enumerate(intervals, 1):
             txt += f"{i}. [{ia:.6f}, {ib:.6f}]\n"
-        txt += "\nSe asignó el primero en los campos 'a' y 'b'."
-
+        if zeros:
+            txt += "\nRaíces exactas detectadas en muestreo:\n"
+            for i, (zx, st) in enumerate(sorted(zeros, key=lambda t: abs(t[0])), 1):
+                txt += f"{i}. x = {zx:.6f} (intervalo sugerido [{zx-st:.6f}, {zx+st:.6f}])\n"
+        txt += "\nSe asignó el intervalo más cercano a 0."
         messagebox.showinfo("Sugerencia de Intervalos", txt)
 
     def toggle_fullscreen(self, event=None):
@@ -3779,11 +4225,12 @@ IMPORTANTE:
                 x_min = min(a, b) - margin
                 x_max = max(a, b) + margin
             # Crear array de x desde la vista actual
-            x = np.linspace(x_min, x_max, 1000)
+            x = np.linspace(x_min, x_max, 2000)
 
             # Evaluar función
             try:
                 y = self.evaluate_function_vectorized(x, func_str)
+                y_plot = np.where(np.isfinite(y), y, np.nan)
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo evaluar la función: {str(e)}")
                 if not use_embedded:
@@ -3791,17 +4238,37 @@ IMPORTANTE:
                 return
 
             # Graficar función con formato numérico
-            ax.plot(x, y, 'b-', linewidth=2, label=f'f(x) = {formatted_func}')
+            ax.plot(x, y_plot, 'b-', linewidth=2, label=f'f(x) = {formatted_func}')
             ax.axhline(y=0, color='k', linewidth=0.8, linestyle='--', alpha=0.5)
             ax.axvline(x=0, color='k', linewidth=0.8, linestyle='--', alpha=0.5)
             ax.axvline(x=a, color='g', linewidth=2, linestyle=':', alpha=0.7, label=f'a = {a:.2f}')
             ax.axvline(x=b, color='r', linewidth=2, linestyle=':', alpha=0.7, label=f'b = {b:.2f}')
-            dy = np.gradient(y, x)
+            dy = np.gradient(np.nan_to_num(y_plot, nan=0.0), x)
             vx = []
             vy = []
-            for i in range(1, len(dy)):
-                if (dy[i-1] > 0 and dy[i] <= 0) or (dy[i-1] < 0 and dy[i] >= 0):
-                    vx.append(x[i]); vy.append(y[i])
+            mask = np.isfinite(y_plot)
+            idx = np.where(mask)[0]
+            if len(idx) > 1:
+                prev = idx[0]
+                run = [prev]
+                for i in idx[1:]:
+                    if i == prev + 1:
+                        run.append(i)
+                    else:
+                        if len(run) > 1:
+                            dr = dy[run]
+                            for j in range(1, len(dr)):
+                                if (dr[j-1] > 0 and dr[j] <= 0) or (dr[j-1] < 0 and dr[j] >= 0):
+                                    k = run[j]
+                                    vx.append(x[k]); vy.append(y_plot[k])
+                        run = [i]
+                    prev = i
+                if len(run) > 1:
+                    dr = dy[run]
+                    for j in range(1, len(dr)):
+                        if (dr[j-1] > 0 and dr[j] <= 0) or (dr[j-1] < 0 and dr[j] >= 0):
+                            k = run[j]
+                            vx.append(x[k]); vy.append(y_plot[k])
             if vx:
                 ax.plot(vx, vy, marker='D', linestyle='None', color='#FF9F0A', label='Vértices')
             self.bis_vertices = list(zip(vx, vy))
@@ -3831,14 +4298,16 @@ IMPORTANTE:
             ax.grid(True, alpha=0.3)
             ax.legend(loc='best', fontsize=9)
 
-            # No ajustar automáticamente límites si ya existe una vista establecida
             if not (use_embedded and restore_view):
                 try:
-                    y_min, y_max = np.nanmin(y), np.nanmax(y)
-                    if not (np.isnan(y_min) or np.isnan(y_max)):
-                        y_range = y_max - y_min
-                        if y_range > 0:
-                            ax.set_ylim(y_min - y_range * 0.1, y_max + y_range * 0.1)
+                    p1, p99 = np.nanpercentile(y_plot, [1, 99])
+                    if not (np.isnan(p1) or np.isnan(p99)):
+                        yr = p99 - p1
+                        if yr > 0:
+                            ax.set_ylim(p1 - yr * 0.1, p99 + yr * 0.1)
+                        else:
+                            ax.set_ylim(p1 - 1, p99 + 1)
+                    ax.set_xlim(x_min, x_max)
                 except Exception:
                     pass
 
