@@ -2194,8 +2194,13 @@ class MatrixCalculator:
             fa = self.evaluate_function(a, func_str)
             fb = self.evaluate_function(b, func_str)
             if fa * fb > 0:
-                messagebox.showerror("Error", "La función no cambia de signo en [a,b].\nFalsa Posición requiere f(a) * f(b) < 0")
-                return
+                sa, sb, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+                if sa is None:
+                    messagebox.showerror("Error", "La función no cambia de signo en [a,b] ni en rangos amplios probados.")
+                    return
+                a, b = sa, sb
+                fa = self.evaluate_function(a, func_str)
+                fb = self.evaluate_function(b, func_str)
             if fa == fb:
                 messagebox.showerror("Error", "f(a) y f(b) son iguales; la fórmula se indetermina")
                 return
@@ -2322,9 +2327,9 @@ class MatrixCalculator:
                 x_min, x_max = prev_xlim
             else:
                 margin = max(abs(b - a) * 0.2, 1)
-                x_min = min(a, b) - margin
-                x_max = max(a, b) + margin
-            x = np.linspace(x_min, x_max, 2000)
+                base_min = min(a, b) - margin; base_max = max(a, b) + margin
+                x_min, x_max = self._determine_plot_range(func_str, base_min, base_max)
+            x = np.linspace(x_min, x_max, 4000)
             y = self.evaluate_function_vectorized(x, func_str)
             y_plot = np.where(np.isfinite(y), y, np.nan)
 
@@ -2480,11 +2485,12 @@ class MatrixCalculator:
             b = x0 + 5
             color_fn = 'b-'
             src_ax = self.nw_plot_ax
-        # Rango x similar al embed
+        # Rango x amplio y automático
         margin = max(abs(b - a) * 0.2, 1)
-        x_min = min(a, b) - margin
-        x_max = max(a, b) + margin
-        x = np.linspace(x_min, x_max, 2000)
+        base_min = min(a, b) - margin
+        base_max = max(a, b) + margin
+        x_min, x_max = self._determine_plot_range(func_str, base_min, base_max)
+        x = np.linspace(x_min, x_max, 4000)
         y = self.evaluate_function_vectorized(x, func_str)
         y_plot = np.where(np.isfinite(y), y, np.nan)
         ax.plot(x, y_plot, color="#2F80ED" if color_fn is None else None, linestyle='-', linewidth=2)
@@ -2628,16 +2634,18 @@ class MatrixCalculator:
         if not intervals and not zeros:
             return None, None, [], []
         if zeros and prefer_zero:
-            zx, st = sorted(zeros, key=lambda t: abs(t[0]))[0]
+            zx, st = sorted(zeros, key=lambda t: (abs(t[0]), 0 if t[0] >= 0 else 1))[0]
             a, b = zx - st, zx + st
         else:
             def score(ab):
                 try:
                     fa = float(self.evaluate_function(ab[0], func_str))
                     fb = float(self.evaluate_function(ab[1], func_str))
-                    val = (min(abs(ab[0]), abs(ab[1])), abs(fa) + abs(fb))
+                    mid = (ab[0] + ab[1]) / 2.0
+                    val = (min(abs(ab[0]), abs(ab[1])), abs(fa) + abs(fb), 0 if mid >= 0 else 1)
                 except Exception:
-                    val = (min(abs(ab[0]), abs(ab[1])), float('inf'))
+                    mid = (ab[0] + ab[1]) / 2.0
+                    val = (min(abs(ab[0]), abs(ab[1])), float('inf'), 0 if mid >= 0 else 1)
                 return val
             a, b = sorted(intervals, key=score)[0]
         try:
@@ -2657,6 +2665,44 @@ class MatrixCalculator:
                 except Exception:
                     pass
         return a, b, intervals, zeros
+
+    def _determine_plot_range(self, func_str, base_min=None, base_max=None):
+        try:
+            specs = [(-20, 20, 0.05), (-50, 50, 0.1), (-100, 100, 0.2)]
+            intervals = []
+            y_limit = 1e6
+            for a_range, b_range, step in specs:
+                prev_x, prev_y = None, None
+                x = float(a_range)
+                while x <= float(b_range):
+                    try:
+                        y = float(self.evaluate_function(x, func_str))
+                        if prev_y is not None:
+                            if all([math.isfinite(y), math.isfinite(prev_y), abs(y) < y_limit, abs(prev_y) < y_limit]):
+                                if prev_y * y < 0:
+                                    intervals.append((prev_x, x))
+                        prev_x, prev_y = x, y
+                    except Exception:
+                        prev_x, prev_y = None, None
+                    x = round(x + step, 10)
+                if intervals:
+                    break
+            if intervals:
+                xs = [v for ab in intervals for v in ab]
+                x_min = min(xs) - 2.0
+                x_max = max(xs) + 2.0
+            else:
+                if base_min is not None and base_max is not None:
+                    x_min, x_max = base_min, base_max
+                else:
+                    x_min, x_max = -10.0, 10.0
+            if x_max - x_min < 10.0:
+                mid = (x_min + x_max) / 2.0
+                x_min = mid - 5.0; x_max = mid + 5.0
+            x_min = max(x_min, -100.0); x_max = min(x_max, 100.0)
+            return x_min, x_max
+        except Exception:
+            return (base_min if base_min is not None else -10.0, base_max if base_max is not None else 10.0)
 
     def suggest_interval_fp(self):
         func_str = self.fp_function_var.get().strip()
@@ -2988,9 +3034,9 @@ class MatrixCalculator:
                 x_min, x_max = prev_xlim
             else:
                 margin = max(abs(b - a) * 0.2, 1)
-                x_min = min(a, b) - margin
-                x_max = max(a, b) + margin
-            x = np.linspace(x_min, x_max, 2000)
+                base_min = min(a, b) - margin; base_max = max(a, b) + margin
+                x_min, x_max = self._determine_plot_range(func_str, base_min, base_max)
+            x = np.linspace(x_min, x_max, 4000)
             y = self.evaluate_function_vectorized(x, func_str)
             y_plot = np.where(np.isfinite(y), y, np.nan)
             if np.all(np.isnan(y_plot)):
@@ -3186,6 +3232,12 @@ class MatrixCalculator:
                 messagebox.showerror("Error", "Por favor ingrese una función")
                 return
             x0 = float(self.sc_x0_var.get()); x1 = float(self.sc_x1_var.get()); tol = float(self.sc_tol_var.get()); max_it = int(self.sc_max_iter_var.get())
+            fx0 = self.evaluate_function(x0, func_str); fx1 = self.evaluate_function(x1, func_str)
+            if fx0 * fx1 > 0:
+                sa, sb, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+                if sa is not None:
+                    x0, x1 = sa, sb
+                    fx0 = self.evaluate_function(x0, func_str); fx1 = self.evaluate_function(x1, func_str)
             self.secant_result_text.config(state="normal"); self.secant_result_text.delete("1.0", tk.END)
             formatted_func = self.format_function_display(func_str)
             self.secant_result_text.insert(tk.END, f"MÉTODO DE LA SECANTE\n", "title")
@@ -3193,23 +3245,26 @@ class MatrixCalculator:
             self.secant_result_text.insert(tk.END, f"x0: {x0}\nx1: {x1}\nTolerancia: {tol}\nMáx. iteraciones: {max_it}\n\n", "step")
             self.secant_result_text.insert(tk.END, "\nTABLA DE ITERACIONES:\n", "title")
             self.secant_result_text.insert(tk.END, "="*80+"\n", "step")
-            header = f"{'Iter':<6} {'x0':>16} {'x1':>16} {'x2':>16} {'f(x1)':>16} {'ea':>16}\n"
+            header = f"{'Iter':<6} {'x0':>16} {'x1':>16} {'x2':>16} {'f(x2)':>16} {'ea':>16}\n"
             self.secant_result_text.insert(tk.END, header, "step"); self.secant_result_text.insert(tk.END, "-"*80+"\n", "step")
-            iteration = 0; prev_x1 = x1; stopped = False
+            iteration = 0; root = None
             while iteration < max_it:
-                fx0 = self.evaluate_function(x0, func_str); fx1 = self.evaluate_function(x1, func_str)
                 if abs(fx1 - fx0) < 1e-12:
                     self.secant_result_text.insert(tk.END, "⚠ División por cero en la fórmula de secante\n", "warning"); break
                 x2 = x1 - fx1 * (x1 - x0) / (fx1 - fx0)
+                fx2 = self.evaluate_function(x2, func_str)
+                if not (math.isfinite(fx0) and math.isfinite(fx1) and math.isfinite(fx2)):
+                    self.secant_result_text.insert(tk.END, "⚠ Valor no finito encontrado; posible discontinuidad. Intente otros x0/x1.\n", "warning"); break
                 ea = abs(x2 - x1)
-                row = f"{iteration+1:<6} {x0:>16.8f} {x1:>16.8f} {x2:>16.8f} {fx1:>16.8f} {ea:>16.8f}\n"
+                row = f"{iteration+1:<6} {x0:>16.8f} {x1:>16.8f} {x2:>16.8f} {fx2:>16.8f} {ea:>16.8f}\n"
                 self.secant_result_text.insert(tk.END, row, "matrix")
-                if abs(fx1) <= tol or ea <= tol:
-                    x1 = x2; prev_x1 = x1; iteration += 1; stopped = True; break
+                if ea <= tol or abs(fx2) <= tol:
+                    root = x2; iteration += 1; break
                 x0, x1 = x1, x2
-                prev_x1 = x1
+                fx0, fx1 = fx1, fx2
                 iteration += 1
-            root = prev_x1
+            if root is None:
+                root = x1
             self.calculated_root = root; self.calculated_func_str = func_str
             self.secant_result_text.insert(tk.END, "="*80+"\n\n", "step")
             self.secant_result_text.insert(tk.END, "RESULTADO FINAL (Secante):\n", "result")
@@ -3251,10 +3306,11 @@ class MatrixCalculator:
                     x_min, x_max = prev_xlim
                 else:
                     x0 = float(self.nw_x0_var.get())
-                    x_min, x_max = x0-5.0, x0+5.0
+                    base_min, base_max = x0-5.0, x0+5.0
+                    x_min, x_max = self._determine_plot_range(func_str, base_min, base_max)
             except:
-                x_min, x_max = -5.0, 5.0
-            x = np.linspace(x_min, x_max, 1000)
+                x_min, x_max = self._determine_plot_range(func_str, -5.0, 5.0)
+            x = np.linspace(x_min, x_max, 3000)
             y = self.evaluate_function_vectorized(x, func_str)
             ax.plot(x, y, 'b-', linewidth=2, label=f"f(x) = {math_utils.format_function_display(func_str)}")
             ax.axhline(0, color='k', linewidth=0.8, linestyle='--', alpha=0.5)
@@ -3835,11 +3891,42 @@ class MatrixCalculator:
             # Evaluar la función en los extremos
             fa = self.evaluate_function(a, func_str)
             fb = self.evaluate_function(b, func_str)
-            
-            # Verificar que haya cambio de signo
+
+            # Manejar raíces en los extremos
+            if fa == 0.0:
+                root = a
+                self.calculated_root = root; self.calculated_func_str = func_str; self.calculated_interval = (a, b)
+                self.bisection_result_text.config(state="normal"); self.bisection_result_text.delete("1.0", tk.END)
+                self.bisection_result_text.insert("1.0", f"MÉTODO DE BISECCIÓN\n", "title")
+                formatted_func = math_utils.format_function_display(func_str)
+                self.bisection_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
+                self.bisection_result_text.insert(tk.END, f"Intervalo inicial: [{a}, {b}]\n", "step")
+                self.bisection_result_text.insert(tk.END, "\nRESULTADO FINAL:\n", "result")
+                self.bisection_result_text.insert(tk.END, f"La raiz aproximada es x = {root:.8f}\n", "result")
+                self.bisection_result_text.insert(tk.END, f"f({root:.8f}) = {self.evaluate_function(root, func_str):.2e}\n", "result")
+                self.bisection_result_text.config(state="disabled"); return
+            if fb == 0.0:
+                root = b
+                self.calculated_root = root; self.calculated_func_str = func_str; self.calculated_interval = (a, b)
+                self.bisection_result_text.config(state="normal"); self.bisection_result_text.delete("1.0", tk.END)
+                self.bisection_result_text.insert("1.0", f"MÉTODO DE BISECCIÓN\n", "title")
+                formatted_func = math_utils.format_function_display(func_str)
+                self.bisection_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
+                self.bisection_result_text.insert(tk.END, f"Intervalo inicial: [{a}, {b}]\n", "step")
+                self.bisection_result_text.insert(tk.END, "\nRESULTADO FINAL:\n", "result")
+                self.bisection_result_text.insert(tk.END, f"La raiz aproximada es x = {root:.8f}\n", "result")
+                self.bisection_result_text.insert(tk.END, f"f({root:.8f}) = {self.evaluate_function(root, func_str):.2e}\n", "result")
+                self.bisection_result_text.config(state="disabled"); return
+
+            # Si no hay cambio de signo, intentar sugerencia automática
             if fa * fb > 0:
-                messagebox.showerror("Error", "La función no cambia de signo en el intervalo [a, b].\nEl método de bisección requiere que f(a) * f(b) < 0")
-                return
+                sa, sb, intervals, zeros = self._suggest_interval_core(func_str, prefer_zero=True)
+                if sa is None:
+                    messagebox.showerror("Error", "La función no cambia de signo en el intervalo [a, b] ni en rangos amplios probados.")
+                    return
+                a, b = sa, sb
+                fa = self.evaluate_function(a, func_str)
+                fb = self.evaluate_function(b, func_str)
             
             # Limpiar resultados anteriores
             self.bisection_result_text.config(state="normal")
@@ -3851,6 +3938,10 @@ class MatrixCalculator:
             formatted_func = math_utils.format_function_display(func_str)
             self.bisection_result_text.insert(tk.END, f"Función: f(x) = {formatted_func}\n", "step")
             self.bisection_result_text.insert(tk.END, f"Intervalo inicial: [{a}, {b}]\n", "step")
+            if fa * fb < 0:
+                self.bisection_result_text.insert(tk.END, "Intervalo asignado automáticamente con cambio de signo.\n", "step")
+            if fa * fb < 0:
+                self.bisection_result_text.insert(tk.END, "Intervalo asignado automáticamente con cambio de signo.\n", "step")
             self.bisection_result_text.insert(tk.END, f"Tolerancia: {tolerance}\n", "step")
             self.bisection_result_text.insert(tk.END, f"Máximo de iteraciones: {max_iterations}\n\n", "step")
             
