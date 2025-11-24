@@ -1,10 +1,15 @@
-import tkinter as tk
-from SumMultMatrices import MatrixCalculator
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+try:
+    from .CalculadoraAlgebraQt import MainWindow
+except ImportError:
+    from CalculadoraAlgebraQt import MainWindow
 
 def main():
-    root = tk.Tk()
-    app = MatrixCalculator(root)
-    root.mainloop()
+    app = QApplication([])
+    w = MainWindow()
+    w.showMaximized()
+    app.exec()
 
 if __name__ == "__main__":
     main()

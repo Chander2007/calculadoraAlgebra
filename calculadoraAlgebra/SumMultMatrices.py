@@ -9,6 +9,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+plt.rcParams['figure.dpi'] = 150
+plt.rcParams['savefig.dpi'] = 150
+plt.rcParams['text.antialiased'] = True
+plt.rcParams['lines.antialiased'] = True
 from matrix_core import Matrix, fraction_to_str, _determinant_step as core_det_step, _determinant_sarrus as core_det_sarrus
 import math_utils
 import operations_sum
@@ -51,7 +55,26 @@ class MatrixCalculator:
             "entry_bg": "#404357",        # Fondo de entradas
             "matrix_bg": "#353849"        # Fondo de matrices
         }
-        self.root.configure(bg=self.colors["background"])
+        self.root.configure(bg=self.colors["background"])\
+        
+        self.style = ttk.Style(self.root)
+        try:
+            self.style.theme_use('vista')
+        except Exception:
+            try:
+                self.style.theme_use('clam')
+            except Exception:
+                pass
+        self.root.option_add('*Font', ('Segoe UI', 11))
+        self.style.configure('TNotebook', background=self.colors['background'])
+        self.style.configure('TNotebook.Tab', font=('Segoe UI', 12, 'bold'), padding=(16, 10))
+        self.style.map('TNotebook.Tab', foreground=[('selected', self.colors['accent'])])
+        self.style.configure('TCombobox', fieldbackground=self.colors['entry_bg'], foreground=self.colors['text'])
+        try:
+            dpi = self.root.winfo_fpixels('1i')
+            self.root.tk.call('tk', 'scaling', dpi/72.0)
+        except Exception:
+            pass
         self.entriesA = []
         self.entriesB = []
         self.operation = tk.StringVar(value="Suma")
@@ -1422,48 +1445,54 @@ class MatrixCalculator:
             "bd": 1
         }
         
-        # Crear encabezados de columnas
+        # Crear encabezados de columnas (alineados con entradas)
         if vector_mode:
             for j in range(cols):
                 var_label = tk.Label(entries_frame, text=f"v{j+1}", 
                                    font=("Segoe UI", 11, "bold"),
                                    bg=self.colors["matrix_bg"], fg=self.colors["accent"])
-                var_label.grid(row=0, column=j*2, padx=3, pady=3)
+                var_label.grid(row=0, column=j, padx=3, pady=3)
         else:
             for j in range(cols):
                 var_label = tk.Label(entries_frame, text=f"x{j+1}", 
                                    font=("Segoe UI", 11, "bold"),
                                    bg=self.colors["matrix_bg"], fg=self.colors["accent"])
-                var_label.grid(row=0, column=j*2, padx=3, pady=3)
-            
-            # Etiqueta para el vector b
+                var_label.grid(row=0, column=j, padx=3, pady=3)
+            # Columna separadora vacía
+            entries_frame.grid_columnconfigure(cols, minsize=6)
+            # Etiqueta para el vector b (a la derecha del separador)
             b_label = tk.Label(entries_frame, text="b", 
                              font=("Segoe UI", 11, "bold"),
                              bg=self.colors["matrix_bg"], fg=self.colors["accent"])
-            b_label.grid(row=0, column=cols*2, padx=3, pady=3)
+            b_label.grid(row=0, column=cols+1, padx=3, pady=3)
         
         # Crear entradas
         for i in range(rows):
             row_entries = []
-            for j in range(cols if vector_mode else cols + 1):
-                entry = tk.Entry(entries_frame, **entry_style)
-                entry.grid(row=i+1, column=j*2 if vector_mode else j, padx=3, pady=3)
-                entry.insert(0, "0")
-                row_entries.append(entry)
-                
-                # Agregar símbolos de operación entre columnas
-                if j < (cols - 1 if vector_mode else cols - 1):
-                    op_label = tk.Label(entries_frame, text="+", 
-                                      font=("Segoe UI", 11),
-                                      bg=self.colors["matrix_bg"], fg=self.colors["accent"])
-                    op_label.grid(row=i+1, column=j*2+1 if vector_mode else j+1, padx=2)
-            
+            if vector_mode:
+                for j in range(cols):
+                    entry = tk.Entry(entries_frame, **entry_style)
+                    entry.grid(row=i+1, column=j, padx=3, pady=3)
+                    entry.insert(0, "0")
+                    row_entries.append(entry)
+            else:
+                # A
+                for j in range(cols):
+                    entry = tk.Entry(entries_frame, **entry_style)
+                    entry.grid(row=i+1, column=j, padx=3, pady=3)
+                    entry.insert(0, "0")
+                    row_entries.append(entry)
+                # b (a la derecha del separador)
+                entry_b = tk.Entry(entries_frame, **entry_style)
+                entry_b.grid(row=i+1, column=cols+1, padx=3, pady=3)
+                entry_b.insert(0, "0")
+                row_entries.append(entry_b)
             self.gauss_entries.append(row_entries)
         
         # Línea vertical para separar A de b (solo si no es modo vectores)
         if not vector_mode:
             separator = tk.Frame(entries_frame, bg=self.colors["accent"], width=2)
-            separator.grid(row=1, column=cols, rowspan=rows, sticky="ns", padx=(0, 3))
+            separator.grid(row=0, column=cols, rowspan=rows+1, sticky="ns")
 
     def solve_gauss_jordan(self):
         """Resuelve el sistema usando Gauss-Jordan con análisis completo"""
@@ -1761,7 +1790,7 @@ class MatrixCalculator:
         tk.Label(prev_frame, text="Previsualización:", font=("Segoe UI", 10, "bold"),
              bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
 
-        self.bis_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.bis_preview_fig = Figure(figsize=(3,0.8), dpi=150)
         self.bis_prev_ax = self.bis_preview_fig.add_subplot(111)
         self.bis_prev_ax.axis('off')
         self.bis_prev_canvas = FigureCanvasTkAgg(self.bis_preview_fig, prev_frame)
@@ -1770,7 +1799,7 @@ class MatrixCalculator:
            # Plot area (embedded) debajo
         plot_frame = tk.Frame(right_frame, bg=self.colors["background"])
         plot_frame.pack(fill="both", expand=True)
-        self.bis_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.bis_plot_fig = Figure(figsize=(5,4), dpi=150)
         self.bis_plot_ax = self.bis_plot_fig.add_subplot(111)
         self.bis_plot_canvas = FigureCanvasTkAgg(self.bis_plot_fig, plot_frame)
         self.bis_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
@@ -2041,7 +2070,7 @@ class MatrixCalculator:
         tk.Label(prev_frame_fp, text="Previsualización:", font=("Segoe UI", 10, "bold"),
              bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
 
-        self.fp_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.fp_preview_fig = Figure(figsize=(3,0.8), dpi=150)
         self.fp_prev_ax = self.fp_preview_fig.add_subplot(111)
         self.fp_prev_ax.axis('off')
         self.fp_prev_canvas = FigureCanvasTkAgg(self.fp_preview_fig, prev_frame_fp)
@@ -2050,7 +2079,7 @@ class MatrixCalculator:
         plot_frame_fp = tk.Frame(right_frame_fp, bg=self.colors["background"])
         plot_frame_fp.pack(fill="both", expand=True)
         # Usar el mismo tamaño de gráfica que en Bisección (más amplio)
-        self.fp_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.fp_plot_fig = Figure(figsize=(5,4), dpi=150)
         self.fp_plot_ax = self.fp_plot_fig.add_subplot(111)
         self.fp_plot_canvas = FigureCanvasTkAgg(self.fp_plot_fig, plot_frame_fp)
         self.fp_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
@@ -2780,7 +2809,7 @@ class MatrixCalculator:
         prev_frame.pack(fill="x", pady=(0,8))
         tk.Label(prev_frame, text="Previsualización:", font=("Segoe UI", 10, "bold"),
                  bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
-        self.nw_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.nw_preview_fig = Figure(figsize=(3,0.8), dpi=150)
         self.nw_prev_ax = self.nw_preview_fig.add_subplot(111)
         self.nw_prev_ax.axis('off')
         self.nw_prev_canvas = FigureCanvasTkAgg(self.nw_preview_fig, prev_frame)
@@ -2790,7 +2819,7 @@ class MatrixCalculator:
 
         plot_frame = tk.Frame(right_frame, bg=self.colors["background"]) 
         plot_frame.pack(fill="both", expand=True)
-        self.nw_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.nw_plot_fig = Figure(figsize=(5,4), dpi=150)
         self.nw_plot_ax = self.nw_plot_fig.add_subplot(111)
         self.nw_plot_canvas = FigureCanvasTkAgg(self.nw_plot_fig, plot_frame)
         self.nw_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
@@ -2912,7 +2941,7 @@ class MatrixCalculator:
         prev_frame.pack(fill="x", pady=(0,8))
         tk.Label(prev_frame, text="Previsualización:", font=("Segoe UI", 10, "bold"),
                  bg=self.colors["secondary_bg"], fg=self.colors["text"]).pack(anchor="w", padx=6, pady=(4,0))
-        self.sc_preview_fig = Figure(figsize=(3,0.8), dpi=100)
+        self.sc_preview_fig = Figure(figsize=(3,0.8), dpi=150)
         self.sc_prev_ax = self.sc_preview_fig.add_subplot(111)
         self.sc_prev_ax.axis('off')
         self.sc_prev_canvas = FigureCanvasTkAgg(self.sc_preview_fig, prev_frame)
@@ -2921,7 +2950,7 @@ class MatrixCalculator:
         self.update_secant_preview()
         plot_frame = tk.Frame(right_frame, bg=self.colors["background"]) 
         plot_frame.pack(fill="both", expand=True)
-        self.sc_plot_fig = Figure(figsize=(5,4), dpi=100)
+        self.sc_plot_fig = Figure(figsize=(5,4), dpi=150)
         self.sc_plot_ax = self.sc_plot_fig.add_subplot(111)
         self.sc_plot_canvas = FigureCanvasTkAgg(self.sc_plot_fig, plot_frame)
         self.sc_plot_canvas.get_tk_widget().pack(fill="both", expand=True, padx=6, pady=4)
