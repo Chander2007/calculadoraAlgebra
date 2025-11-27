@@ -1,9 +1,10 @@
+import sys
 from PySide6 import QtGui
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox
 from PySide6.QtCore import Qt
 from fractions import Fraction
-import numpy as np
 import math
+import numpy as np
 import re
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
@@ -33,6 +34,7 @@ class MatricesPage(QWidget):
         super().__init__(parent)
         self.colors = colors
         self.rows = 3
+        self.rowsB = 3
         self.colsA = 3
         self.colsB = 3
         layout = QVBoxLayout(self)
@@ -42,39 +44,77 @@ class MatricesPage(QWidget):
         title.setStyleSheet(f"color:{colors['accent']};")
         title.setFont(QtGui.QFont("Segoe UI", 22, QtGui.QFont.Bold))
         layout.addWidget(title, alignment=Qt.AlignLeft)
-        top = QHBoxLayout()
-        layout.addLayout(top)
+
+        wrapper = QHBoxLayout(); wrapper.setAlignment(Qt.AlignCenter)
+        layout.addLayout(wrapper)
+
+        control_card = QFrame(); control_card.setObjectName("matrixControlsCard")
+        control_card.setStyleSheet(
+            """
+            QFrame#matrixControlsCard {
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 14px;
+            }
+            """
+        )
+        control_card.setFixedWidth(640)
+        card = QVBoxLayout(control_card); card.setContentsMargins(18, 18, 18, 18); card.setSpacing(14)
+        wrapper.addWidget(control_card)
+
         self.operation = QComboBox()
         self.operation.addItems(["Suma", "Resta", "Multiplicación", "Determinante", "Cofactor"])
         self.operation.setFixedWidth(220)
-        top.addWidget(QLabel("Operación:"), alignment=Qt.AlignLeft)
-        top.addWidget(self.operation, alignment=Qt.AlignLeft)
-        dim = QHBoxLayout()
-        self.spin_rows = QSpinBox(); self.spin_rows.setRange(1, 10); self.spin_rows.setValue(3)
-        self.spin_colsA = QSpinBox(); self.spin_colsA.setRange(1, 10); self.spin_colsA.setValue(3)
-        self.spin_colsB = QSpinBox(); self.spin_colsB.setRange(1, 10); self.spin_colsB.setValue(3)
-        dim.addWidget(QLabel("Filas (A):")); dim.addWidget(self.spin_rows)
-        dim.addWidget(QLabel("Cols A:")); dim.addWidget(self.spin_colsA)
-        dim.addWidget(QLabel("Cols B:")); dim.addWidget(self.spin_colsB)
-        top.addLayout(dim)
-        self.view_mode = QComboBox(); self.view_mode.addItems(["Apilada", "Lado a lado"])
-        top.addWidget(QLabel("Vista:")); top.addWidget(self.view_mode)
-        btns = QHBoxLayout()
-        self.btn_generate = QPushButton("Generar")
+
+        self.view_mode = QComboBox()
+        self.view_mode.addItems(["Apilada", "Lado a lado"])
+        self.view_mode.setFixedWidth(140)
+
+        self.spin_rows = QSpinBox(); self.spin_rows.setRange(1, 12); self.spin_rows.setValue(self.rows); self.spin_rows.setFixedWidth(70)
+        self.spin_colsA = QSpinBox(); self.spin_colsA.setRange(1, 12); self.spin_colsA.setValue(self.colsA); self.spin_colsA.setFixedWidth(70)
+        self.spin_rowsB = QSpinBox(); self.spin_rowsB.setRange(1, 12); self.spin_rowsB.setValue(self.rowsB); self.spin_rowsB.setFixedWidth(70)
+        self.spin_colsB = QSpinBox(); self.spin_colsB.setRange(1, 12); self.spin_colsB.setValue(self.colsB); self.spin_colsB.setFixedWidth(70)
+
+        card = QVBoxLayout(control_card); card.setContentsMargins(18, 18, 18, 18); card.setSpacing(14)
+        wrapper.addWidget(control_card)
+
+        top_row = QHBoxLayout(); top_row.setSpacing(10)
+        lbl_operation = QLabel("Operación:"); lbl_operation.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        top_row.addWidget(lbl_operation)
+        top_row.addWidget(self.operation)
+        top_row.addSpacing(12)
+        top_row.addWidget(QLabel("Vista:"))
+        top_row.addWidget(self.view_mode)
+        top_row.addStretch(1)
+        card.addLayout(top_row)
+
+        dims = QGridLayout(); dims.setHorizontalSpacing(12); dims.setVerticalSpacing(10)
+        dims.addWidget(QLabel("Filas (A):"), 0, 0); dims.addWidget(self.spin_rows, 0, 1)
+        dims.addWidget(QLabel("Cols (A):"), 0, 2); dims.addWidget(self.spin_colsA, 0, 3)
+        dims.addWidget(QLabel("Filas (B):"), 1, 0); dims.addWidget(self.spin_rowsB, 1, 1)
+        dims.addWidget(QLabel("Cols (B):"), 1, 2); dims.addWidget(self.spin_colsB, 1, 3)
+        card.addLayout(dims)
+
+        btns = QHBoxLayout(); btns.setSpacing(10); btns.setAlignment(Qt.AlignRight)
+        self.btn_generate = QPushButton("Generar Tablas")
         self.btn_solve = QPushButton("Resolver")
         self.btn_clear = QPushButton("Limpiar")
-        btns.addStretch(1)
         for b in (self.btn_generate, self.btn_solve, self.btn_clear):
-            b.setMinimumWidth(140)
-            btns.addWidget(b)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedSize(110, 36)
+        btns.addWidget(self.btn_generate); btns.addWidget(self.btn_solve); btns.addWidget(self.btn_clear)
         layout.addLayout(btns)
-        self.body = QVBoxLayout()
-        layout.addLayout(self.body)
-        self.view_mode.currentTextChanged.connect(lambda _: self.build_body(self.view_mode.currentText()=="Apilada"))
-        self.build_body(True)
-        self.btn_generate.clicked.connect(lambda: (self.generate_tables(), self._auto_resize_table(self.tableA), self._auto_resize_table(self.tableB)))
+        self.body = QVBoxLayout(); self.body.setSpacing(16); layout.addLayout(self.body)
+        self.view_mode.currentTextChanged.connect(self._on_view_mode)
+        self.view_mode.setCurrentText("Lado a lado")
+        self.btn_generate.clicked.connect(self.generate_tables)
         self.btn_clear.clicked.connect(self.clear_all)
         self.btn_solve.clicked.connect(self.solve_operation)
+
+        self.spin_rows.valueChanged.connect(lambda _: self.generate_tables())
+        self.spin_colsA.valueChanged.connect(lambda _: self.generate_tables())
+        self.spin_rowsB.valueChanged.connect(lambda _: self.generate_tables())
+        self.spin_colsB.valueChanged.connect(lambda _: self.generate_tables())
         self.apply_palette()
 
     def apply_palette(self):
@@ -85,33 +125,76 @@ class MatricesPage(QWidget):
             QPlainTextEdit {{ background:{self.colors['secondary_bg']}; color:{self.colors['text']}; border:1px solid {self.colors['secondary_bg']}; }}
         """)
 
+    def _on_view_mode(self, text):
+        self.build_body(text == "Apilada")
+
+    def _adjust_columns(self, delta):
+        self.spin_colsA.setValue(max(1, self.spin_colsA.value() + delta))
+        self.spin_colsB.setValue(max(1, self.spin_colsB.value() + delta))
+
+    def _adjust_rows(self, delta):
+        self.spin_rows.setValue(max(1, self.spin_rows.value() + delta))
+        self.spin_rowsB.setValue(max(1, self.spin_rowsB.value() + delta))
+
+    def _set_table_rows(self, table: QTableWidget, target: int):
+        while table.rowCount() < target:
+            table.insertRow(table.rowCount())
+        while table.rowCount() > target and table.rowCount() > 1:
+            table.removeRow(table.rowCount() - 1)
+        self._auto_resize_table(table)
+
+    def _set_table_columns(self, table: QTableWidget, target: int):
+        while table.columnCount() < target:
+            table.insertColumn(table.columnCount())
+        while table.columnCount() > target and table.columnCount() > 1:
+            table.removeColumn(table.columnCount() - 1)
+        self._auto_resize_table(table)
+
+    def generate_tables(self):
+        self.rows = self.spin_rows.value()
+        self.colsA = self.spin_colsA.value()
+        self.rowsB = self.spin_rowsB.value()
+        self.colsB = self.spin_colsB.value()
+        self.build_body(self.view_mode.currentText() == "Apilada")
+
     def build_body(self, stacked: bool):
         self._clear_layout(self.body)
-        self.tableA = QTableWidget(3, 3)
-        self.tableB = QTableWidget(3, 3)
-        for t in (self.tableA, self.tableB):
-            t.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-            t.verticalHeader().setVisible(False)
-        sectionA = QVBoxLayout(); sectionA.addWidget(QLabel("Matriz A")); sectionA.addWidget(self.tableA)
-        controlsA = QHBoxLayout()
+        self.tableA = QTableWidget(self.rows, self.colsA)
+        self.tableB = QTableWidget(self.rowsB, self.colsB)
+        for table in (self.tableA, self.tableB):
+            table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            table.setMinimumHeight(220)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            table.verticalHeader().setDefaultSectionSize(32)
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sectionA = QVBoxLayout(); sectionA.setSpacing(8)
+        sectionA.addWidget(QLabel("Matriz A")); sectionA.addWidget(self.tableA)
+        controlsA = QHBoxLayout(); controlsA.setSpacing(6); controlsA.setAlignment(Qt.AlignLeft)
         btn_a_sub_row = QPushButton("− Fila"); btn_a_add_row = QPushButton("+ Fila")
         btn_a_sub_col = QPushButton("− Col"); btn_a_add_col = QPushButton("+ Col")
-        for b in (btn_a_sub_row, btn_a_add_row, btn_a_sub_col, btn_a_add_col): b.setMinimumWidth(100)
-        controlsA.addWidget(btn_a_sub_row); controlsA.addWidget(btn_a_add_row); controlsA.addWidget(btn_a_sub_col); controlsA.addWidget(btn_a_add_col)
-        sectionA.addLayout(controlsA)
-        sectionB = QVBoxLayout(); sectionB.addWidget(QLabel("Matriz B")); sectionB.addWidget(self.tableB)
-        controlsB = QHBoxLayout()
+        for b in (btn_a_sub_row, btn_a_add_row, btn_a_sub_col, btn_a_add_col):
+            b.setFixedSize(90, 32); b.setCursor(Qt.PointingHandCursor); controlsA.addWidget(b)
+        controlsA.addStretch(1); sectionA.addLayout(controlsA)
+
+        sectionB = QVBoxLayout(); sectionB.setSpacing(8)
+        sectionB.addWidget(QLabel("Matriz B")); sectionB.addWidget(self.tableB)
+        controlsB = QHBoxLayout(); controlsB.setSpacing(6); controlsB.setAlignment(Qt.AlignLeft)
         btn_b_sub_row = QPushButton("− Fila"); btn_b_add_row = QPushButton("+ Fila")
         btn_b_sub_col = QPushButton("− Col"); btn_b_add_col = QPushButton("+ Col")
-        for b in (btn_b_sub_row, btn_b_add_row, btn_b_sub_col, btn_b_add_col): b.setMinimumWidth(100)
-        controlsB.addWidget(btn_b_sub_row); controlsB.addWidget(btn_b_add_row); controlsB.addWidget(btn_b_sub_col); controlsB.addWidget(btn_b_add_col)
-        sectionB.addLayout(controlsB)
+        for b in (btn_b_sub_row, btn_b_add_row, btn_b_sub_col, btn_b_add_col):
+            b.setFixedSize(90, 32); b.setCursor(Qt.PointingHandCursor); controlsB.addWidget(b)
+        controlsB.addStretch(1); sectionB.addLayout(controlsB)
+
+        containerA = QWidget(); containerA.setLayout(sectionA)
+        containerB = QWidget(); containerB.setLayout(sectionB)
         if stacked:
-            self.body.addLayout(sectionA)
-            self.body.addLayout(sectionB)
+            matrices_layout = QVBoxLayout(); matrices_layout.setSpacing(16)
+            matrices_layout.addWidget(containerA); matrices_layout.addWidget(containerB)
         else:
-            split = QHBoxLayout(); split.addLayout(sectionA,1); split.addLayout(sectionB,1)
-            self.body.addLayout(split)
+            matrices_layout = QHBoxLayout(); matrices_layout.setSpacing(24)
+            matrices_layout.addWidget(containerA, 1); matrices_layout.addWidget(containerB, 1)
+        self.body.addLayout(matrices_layout)
+
         result_box = QVBoxLayout()
         self.result_table = QTableWidget(0, 0)
         self.result_table.verticalHeader().setVisible(False)
@@ -120,32 +203,20 @@ class MatricesPage(QWidget):
         self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(160)
         result_box.addWidget(QLabel("Detalle")); result_box.addWidget(self.log, 1)
         self.body.addLayout(result_box)
-        self._auto_resize_table(self.tableA); self._auto_resize_table(self.tableB)
-        btn_a_add_row.clicked.connect(lambda: (self._add_row(self.tableA), self._auto_resize_table(self.tableA)))
-        btn_a_sub_row.clicked.connect(lambda: (self._sub_row(self.tableA), self._auto_resize_table(self.tableA)))
-        btn_a_add_col.clicked.connect(lambda: (self._add_col(self.tableA), self._auto_resize_table(self.tableA)))
-        btn_a_sub_col.clicked.connect(lambda: (self._sub_col(self.tableA), self._auto_resize_table(self.tableA)))
-        btn_b_add_row.clicked.connect(lambda: (self._add_row(self.tableB), self._auto_resize_table(self.tableB)))
-        btn_b_sub_row.clicked.connect(lambda: (self._sub_row(self.tableB), self._auto_resize_table(self.tableB)))
-        btn_b_add_col.clicked.connect(lambda: (self._add_col(self.tableB), self._auto_resize_table(self.tableB)))
-        btn_b_sub_col.clicked.connect(lambda: (self._sub_col(self.tableB), self._auto_resize_table(self.tableB)))
 
-    def generate_tables(self):
-        self.rows = self.spin_rows.value()
-        self.colsA = self.spin_colsA.value()
-        self.colsB = self.spin_colsB.value()
-        self.tableA.setRowCount(self.rows); self.tableA.setColumnCount(self.colsA)
-        self.tableB.setRowCount(self.rows); self.tableB.setColumnCount(self.colsB)
-        for c in range(self.colsA):
-            self.tableA.setColumnWidth(c, 100)
-        for c in range(self.colsB):
-            self.tableB.setColumnWidth(c, 100)
-        for r in range(self.rows):
-            for c in range(self.colsA):
-                self.tableA.setItem(r, c, QTableWidgetItem("0"))
-        for r in range(self.rows):
-            for c in range(self.colsB):
-                self.tableB.setItem(r, c, QTableWidgetItem("0"))
+        self._auto_resize_table(self.tableA); self._auto_resize_table(self.tableB)
+        btn_a_add_row.clicked.connect(lambda: self._adjust_table_rows(self.tableA, self.spin_rows, 1))
+        btn_a_sub_row.clicked.connect(lambda: self._adjust_table_rows(self.tableA, self.spin_rows, -1))
+        btn_a_add_col.clicked.connect(lambda: self._adjust_table_cols(self.tableA, self.spin_colsA, 1))
+        btn_a_sub_col.clicked.connect(lambda: self._adjust_table_cols(self.tableA, self.spin_colsA, -1))
+        btn_b_add_row.clicked.connect(lambda: self._adjust_table_rows(self.tableB, self.spin_rowsB, 1))
+        btn_b_sub_row.clicked.connect(lambda: self._adjust_table_rows(self.tableB, self.spin_rowsB, -1))
+        btn_b_add_col.clicked.connect(lambda: self._adjust_table_cols(self.tableB, self.spin_colsB, 1))
+        btn_b_sub_col.clicked.connect(lambda: self._adjust_table_cols(self.tableB, self.spin_colsB, -1))
+        self._auto_resize_table(self.tableA)
+        self._auto_resize_table(self.tableB)
+
+        result_box.addStretch(1)
 
     def read_matrix(self, table) -> Matrix:
         rows = table.rowCount(); cols = table.columnCount(); data = []
@@ -226,9 +297,12 @@ class MatricesPage(QWidget):
                     self._clear_layout(sub)
 
     def _auto_resize_table(self, table: QTableWidget):
+        if not table:
+            return
+        table.resizeColumnsToContents()
         table.resizeRowsToContents()
-        h = table.verticalHeader().length() + table.horizontalHeader().height() + 6
-        table.setMinimumHeight(h)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.verticalHeader().setDefaultSectionSize(32)
 
 class GaussJordanPage(QWidget):
     def __init__(self, colors, parent=None):
@@ -445,71 +519,196 @@ class RootFindingPage(QWidget):
             self.plot_ax.set_axis_off(); self.canvas.draw_idle()
 
     def _bisection(self, func, a, b, tol, max_it):
-        original = (a, b); fa = self._eval(a, func); fb = self._eval(b, func)
+        original = (a, b)
+        rows = []
+        fa = self._eval(a, func)
+        fb = self._eval(b, func)
+        if fa == 0.0:
+            rows.append((1, a, b, a, fa, fb, fa, 0.0))
+            return {
+                "root": a,
+                "f_root": fa,
+                "rows": rows,
+                "formats": ["d"] + ["float"] * 7,
+                "interval": (a, b),
+                "original": original,
+            }
+        if fb == 0.0:
+            rows.append((1, a, b, b, fa, fb, fb, 0.0))
+            return {
+                "root": b,
+                "f_root": fb,
+                "rows": rows,
+                "formats": ["d"] + ["float"] * 7,
+                "interval": (a, b),
+                "original": original,
+            }
         if fa * fb > 0:
             interval = self._auto_interval(func, a, b)
             if interval is None:
-                raise ValueError("La función no cambia de signo en el intervalo dado.")
-            a, b = interval; fa = self._eval(a, func); fb = self._eval(b, func)
-        rows = []; prev_c = None
+                raise ValueError("La función no cambia de signo en el intervalo dado ni en los rangos sugeridos.")
+            a, b = interval
+            fa = self._eval(a, func)
+            fb = self._eval(b, func)
+        root = None
         for it in range(1, max_it + 1):
-            c = (a + b) / 2; fc = self._eval(c, func); ea = abs(c - prev_c) if prev_c is not None else None
-            rows.append((it, a, b, c, fa, fb, fc, abs(b - a) / 2))
-            if abs(fc) <= tol or abs(b - a) / 2 <= tol:
-                prev_c = c; break
-            if fa * fc < 0: b, fb = c, fc
-            else: a, fa = c, fc
-            prev_c = c
-        root = prev_c if prev_c is not None else (a + b) / 2
-        return {"root": root, "f_root": self._eval(root, func), "rows": rows, "formats": ["d"] + ["float"] * 7, "interval": (a, b), "original": original}
+            c = (a + b) / 2.0
+            fc = self._eval(c, func)
+            error = abs(b - a) / 2.0
+            rows.append((it, a, b, c, fa, fb, fc, error))
+            if abs(fc) <= tol or error <= tol:
+                root = c
+                break
+            if fa * fc < 0:
+                b, fb = c, fc
+            else:
+                a, fa = c, fc
+        if root is None:
+            root = (a + b) / 2.0
+        return {
+            "root": root,
+            "f_root": self._eval(root, func),
+            "rows": rows,
+            "formats": ["d"] + ["float"] * 7,
+            "interval": (a, b),
+            "original": original,
+        }
 
     def _false_position(self, func, a, b, tol, max_it):
-        original = (a, b); fa = self._eval(a, func); fb = self._eval(b, func)
+        original = (a, b)
+        rows = []
+        fa = self._eval(a, func)
+        fb = self._eval(b, func)
+        if fa == 0.0:
+            rows.append((1, a, b, a, fa, fb, fa, 0.0))
+            return {
+                "root": a,
+                "f_root": fa,
+                "rows": rows,
+                "formats": ["d"] + ["float"] * 7,
+                "interval": (a, b),
+                "original": original,
+            }
+        if fb == 0.0:
+            rows.append((1, a, b, b, fa, fb, fb, 0.0))
+            return {
+                "root": b,
+                "f_root": fb,
+                "rows": rows,
+                "formats": ["d"] + ["float"] * 7,
+                "interval": (a, b),
+                "original": original,
+            }
         if fa * fb > 0:
             interval = self._auto_interval(func, a, b)
             if interval is None:
-                raise ValueError("La función no cambia de signo en el intervalo dado.")
-            a, b = interval; fa = self._eval(a, func); fb = self._eval(b, func)
-        rows = []; prev_c = None
+                raise ValueError("La función no cambia de signo en el intervalo dado ni en los rangos sugeridos.")
+            a, b = interval
+            fa = self._eval(a, func)
+            fb = self._eval(b, func)
+        prev_c = None
+        root = None
         for it in range(1, max_it + 1):
-            fa = self._eval(a, func); fb = self._eval(b, func)
+            fa = self._eval(a, func)
+            fb = self._eval(b, func)
             if abs(fb - fa) < 1e-14:
-                raise ValueError("f(a) y f(b) casi iguales; el método se vuelve inestable.")
-            c = b - fb * (b - a) / (fb - fa); fc = self._eval(c, func); ea = abs(c - prev_c) if prev_c is not None else None
+                raise ValueError("f(a) y f(b) casi iguales; el método de falsa posición es inestable.")
+            c = b - fb * (b - a) / (fb - fa)
+            fc = self._eval(c, func)
+            ea = abs(fc)
             rows.append((it, a, b, c, fa, fb, fc, ea))
-            if abs(fc) <= tol or (ea is not None and ea <= tol):
-                prev_c = c; break
-            if fa * fc < 0: b = c
-            else: a = c
+            if abs(fc) <= tol or (prev_c is not None and abs(c - prev_c) <= tol) or abs(b - a) <= tol:
+                root = c
+                break
+            if fa * fc < 0:
+                b, fb = c, fc
+            else:
+                a, fa = c, fc
             prev_c = c
-        root = prev_c if prev_c is not None else (a + b) / 2
-        return {"root": root, "f_root": self._eval(root, func), "rows": rows, "formats": ["d"] + ["float"] * 7, "interval": (a, b), "original": original}
+        if root is None:
+            root = prev_c if prev_c is not None else (a + b) / 2.0
+        return {
+            "root": root,
+            "f_root": self._eval(root, func),
+            "rows": rows,
+            "formats": ["d"] + ["float"] * 7,
+            "interval": (a, b),
+            "original": original,
+        }
 
     def _newton(self, func, x0, tol, max_it):
-        rows = []; x = x0
+        rows = []
+        x = x0
         for it in range(1, max_it + 1):
-            fx = self._eval(x, func); dfx = self._derivative(x, func)
+            fx = self._eval(x, func)
+            dfx = self._derivative(x, func)
             if abs(dfx) < 1e-14:
-                raise ValueError("Derivada cercana a cero; elige otro valor inicial.")
-            x_next = x - fx / dfx; ea = abs(x_next - x)
-            rows.append((it, x, fx, dfx, ea)); x = x_next
+                raise ValueError("Derivada cercana a cero; intenta con otro punto inicial.")
+            x_next = x - fx / dfx
+            ea = abs(x_next - x)
+            rows.append((it, x, fx, dfx, ea))
+            x = x_next
             if ea <= tol or abs(self._eval(x, func)) <= tol:
                 break
-        return {"root": x, "f_root": self._eval(x, func), "rows": rows, "formats": ["d"] + ["float"] * 4, "interval": (x, x), "original": (x0, None)}
+        return {
+            "root": x,
+            "f_root": self._eval(x, func),
+            "rows": rows,
+            "formats": ["d"] + ["float"] * 4,
+            "interval": (x, x),
+            "original": (x0, None),
+        }
 
     def _secant(self, func, x0, x1, tol, max_it):
-        rows = []; a, b = x0, x1; fa = self._eval(a, func); fb = self._eval(b, func)
-        if abs(fb - fa) < 1e-14:
-            raise ValueError("f(x0) y f(x1) casi iguales; el método de la secante falla.")
+        original = (x0, x1)
+        rows = []
+        a, b = x0, x1
+        fa = self._eval(a, func)
+        fb = self._eval(b, func)
+        if fa == 0.0:
+            rows.append((1, a, b, a, fa, 0.0))
+            return {
+                "root": a,
+                "f_root": fa,
+                "rows": rows,
+                "formats": ["d"] + ["float"] * 5,
+                "interval": (a, b),
+                "original": original,
+            }
+        if fb == 0.0:
+            rows.append((1, a, b, b, fb, 0.0))
+            return {
+                "root": b,
+                "f_root": fb,
+                "rows": rows,
+                "formats": ["d"] + ["float"] * 5,
+                "interval": (a, b),
+                "original": original,
+            }
+        root = None
         for it in range(1, max_it + 1):
             if abs(fb - fa) < 1e-14:
-                raise ValueError("División por cero durante las iteraciones de Secante.")
-            c = b - fb * (b - a) / (fb - fa); fc = self._eval(c, func); ea = abs(c - b)
+                raise ValueError("f(x0) y f(x1) casi iguales; el método de la secante falla.")
+            c = b - fb * (b - a) / (fb - fa)
+            fc = self._eval(c, func)
+            ea = abs(c - b)
             rows.append((it, a, b, c, fc, ea))
             if ea <= tol or abs(fc) <= tol:
-                b = c; break
-            a, b = b, c; fa, fb = fb, fc
-        return {"root": b, "f_root": self._eval(b, func), "rows": rows, "formats": ["d"] + ["float"] * 5, "interval": (a, b), "original": (x0, x1)}
+                root = c
+                a, b = b, c
+                break
+            a, b = b, c
+            fa, fb = fb, fc
+        if root is None:
+            root = b
+        return {
+            "root": root,
+            "f_root": self._eval(root, func),
+            "rows": rows,
+            "formats": ["d"] + ["float"] * 5,
+            "interval": (a, b),
+            "original": original,
+        }
 
     def _build_result_text(self, method, func, tol, max_it, data, params):
         fmt_func = math_utils.format_function_display(func)
@@ -570,55 +769,123 @@ class RootFindingPage(QWidget):
             return f"{value:.10f}"
         return "NaN"
 
+    def _eval(self, x, func):
+        return math_utils.evaluate_function(x, func)
+    
+    def _evaluate_vector(self, xs, func):
+        return math_utils.evaluate_function_vectorized(xs, func)
+    
+    def _derivative(self, x, func, h=1e-6):
+        return (self._eval(x + h, func) - self._eval(x - h, func)) / (2.0 * h)
+    
     def _plot_function(self, method, func, params, root):
         self.plot_ax.clear()
         try:
             if method in ("Bisección", "Falsa Posición"):
-                base_min, base_max = params["a"], params["b"]
+                base_min, base_max = params.get("a", -5.0), params.get("b", 5.0)
             elif method == "Secante":
-                base_min = min(params["x0"], params["x1"]); base_max = max(params["x0"], params["x1"])
+                base_min = min(params.get("x0", -5.0), params.get("x1", 5.0))
+                base_max = max(params.get("x0", -5.0), params.get("x1", 5.0))
             else:
-                base_min, base_max = params["x0"] - 5, params["x0"] + 5
+                x0 = params.get("x0", 0.0)
+                base_min, base_max = x0 - 5.0, x0 + 5.0
             if base_min == base_max:
-                base_min -= 5; base_max += 5
+                base_min -= 5.0
+                base_max += 5.0
             x_min, x_max = self._determine_plot_range(func, base_min, base_max)
-            xs = np.linspace(x_min, x_max, 2000)
-            ys = math_utils.evaluate_function_vectorized(xs, func)
+            xs = np.linspace(x_min, x_max, 4000)
+            ys = self._evaluate_vector(xs, func)
             ys = np.where(np.isfinite(ys), ys, np.nan)
-            self.plot_ax.plot(xs, ys, color="#FFB703", linewidth=2, label="f(x)")
-            self.plot_ax.axhline(0, color="#666", linestyle="--", linewidth=1)
-            self.plot_ax.axvline(0, color="#666", linestyle="--", linewidth=1)
+            self.plot_ax.plot(xs, ys, color="#2F80ED", linewidth=2.0, label=f"f(x) = {math_utils.format_function_display(func)}")
+            self.plot_ax.axhline(0, color="#666", linestyle="--", linewidth=1.2, alpha=0.7)
+            self.plot_ax.axvline(0, color="#666", linestyle="--", linewidth=1.2, alpha=0.7)
+
             if method in ("Bisección", "Falsa Posición"):
-                self.plot_ax.axvline(params["a"], color="#30D158", linestyle=":", linewidth=1.4, label=f"a = {params['a']:.3f}")
-                self.plot_ax.axvline(params["b"], color="#FF453A", linestyle=":", linewidth=1.4, label=f"b = {params['b']:.3f}")
+                a_line, b_line = params.get("a"), params.get("b")
+                if a_line is not None:
+                    self.plot_ax.axvline(a_line, color="#30D158", linestyle=":", linewidth=1.4, label=f"a = {a_line:.3f}")
+                    self.plot_ax.plot(a_line, self._eval(a_line, func), "o", color="#30D158", markersize=6)
+                if b_line is not None:
+                    self.plot_ax.axvline(b_line, color="#FF453A", linestyle=":", linewidth=1.4, label=f"b = {b_line:.3f}")
+                    self.plot_ax.plot(b_line, self._eval(b_line, func), "o", color="#FF453A", markersize=6)
+                original = params.get("original")
+                if isinstance(original, (tuple, list)) and len(original) == 2:
+                    oa, ob = original
+                    if oa is not None and ob is not None and (oa, ob) != (a_line, b_line):
+                        self.plot_ax.axvspan(min(oa, ob), max(oa, ob), color="#FF9F0A", alpha=0.08, label=f"Intervalo original [{oa:.3f}, {ob:.3f}]")
             elif method == "Secante":
-                y0 = self._eval(params["x0"], func); y1 = self._eval(params["x1"], func)
-                self.plot_ax.scatter([params["x0"], params["x1"]], [y0, y1], color="#30D158", marker="o", label="Puntos iniciales")
+                x0, x1 = params.get("x0"), params.get("x1")
+                if x0 is not None and x1 is not None:
+                    self.plot_ax.scatter([x0, x1], [self._eval(x0, func), self._eval(x1, func)], color="#30D158", marker="o", label="Puntos iniciales")
+            elif method == "Newton-Raphson":
+                x0 = params.get("x0")
+                if x0 is not None:
+                    self.plot_ax.plot(x0, self._eval(x0, func), "o", color="#FF9F0A", markersize=7, label=f"x₀ = {x0:.3f}")
+
             if root is not None and math.isfinite(root):
                 fr = self._eval(root, func)
-                self.plot_ax.plot(root, fr, "o", color="#BB33FF", markersize=8, label=f"Raíz ≈ {root:.4f}")
-                self.plot_ax.axvline(root, color="#BB33FF", linestyle="--", linewidth=1.2)
-            try:
-                low, high = np.nanpercentile(ys, [1, 99])
-                if np.isfinite(low) and np.isfinite(high) and high > low:
-                    pad = 0.1 * (high - low)
-                    self.plot_ax.set_ylim(low - pad, high + pad)
-            except Exception:
-                pass
+                if math.isfinite(fr):
+                    self.plot_ax.plot(root, fr, "o", color="#BB33FF", markersize=9, label=f"Raíz ≈ {root:.4f}")
+                    self.plot_ax.axvline(root, color="#BB33FF", linestyle="--", linewidth=1.2, alpha=0.8)
+
+            finite_mask = np.isfinite(ys)
+            if np.any(finite_mask):
+                dy = np.gradient(np.nan_to_num(ys, nan=0.0), xs)
+                vertex_x, vertex_y = [], []
+                current = []
+                for idx in range(len(xs)):
+                    if finite_mask[idx]:
+                        current.append(idx)
+                    elif current:
+                        if len(current) > 1:
+                            segment = current
+                            deriv = dy[segment]
+                            for j in range(1, len(deriv)):
+                                if deriv[j - 1] == 0:
+                                    continue
+                                if deriv[j - 1] > 0 >= deriv[j] or deriv[j - 1] < 0 <= deriv[j]:
+                                    k = segment[j]
+                                    vertex_x.append(xs[k])
+                                    vertex_y.append(ys[k])
+                        current = []
+                if current and len(current) > 1:
+                    deriv = dy[current]
+                    for j in range(1, len(deriv)):
+                        if deriv[j - 1] == 0:
+                            continue
+                        if deriv[j - 1] > 0 >= deriv[j] or deriv[j - 1] < 0 <= deriv[j]:
+                            k = current[j]
+                            vertex_x.append(xs[k])
+                            vertex_y.append(ys[k])
+                if vertex_x:
+                    self.plot_ax.plot(vertex_x, vertex_y, "D", color="#FF9F0A", markersize=6, label="Vértices")
+
+                try:
+                    low, high = np.nanpercentile(ys, [1, 99])
+                    if np.isfinite(low) and np.isfinite(high) and high > low:
+                        pad = 0.1 * (high - low)
+                        self.plot_ax.set_ylim(low - pad, high + pad)
+                except Exception:
+                    pass
+
             self.plot_ax.set_xlim(x_min, x_max)
-            self.plot_ax.set_xlabel("x"); self.plot_ax.set_ylabel("f(x)")
-            self.plot_ax.grid(True, linestyle="--", alpha=0.35); self.plot_ax.legend()
+            self.plot_ax.set_xlabel("x")
+            self.plot_ax.set_ylabel("f(x)")
+            self.plot_ax.grid(True, linestyle="--", alpha=0.35)
+            self.plot_ax.legend()
         except Exception as err:
+            self._show_error_dialog(str(err))
             self.plot_ax.clear()
             self.plot_ax.text(0.5, 0.5, f"No se pudo graficar:\n{err}", ha="center", va="center", color="#FF453A")
             self.plot_ax.set_axis_off()
-        self.figure.tight_layout(); self.canvas.draw_idle()
-
-    def _eval(self, x, func):
-        return math_utils.evaluate_function(x, func)
-
-    def _derivative(self, x, func, h=1e-6):
-        return (self._eval(x + h, func) - self._eval(x - h, func)) / (2 * h)
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
+    def _show_error_dialog(self, message):
+        dlg = QMessageBox(self)
+        dlg.setIcon(QMessageBox.Critical)
+        dlg.setWindowTitle("Error al graficar")
+        dlg.setText(message)
+        dlg.exec()
 
     def _auto_interval(self, func, a, b):
         res = self._suggest_interval_core(func)
@@ -628,20 +895,25 @@ class RootFindingPage(QWidget):
 
     def _suggest_interval_core(self, func, prefer_zero=True):
         search_specs = [(-10, 10, 0.1), (-50, 50, 0.2), (-100, 100, 0.5)]
-        intervals = []; zeros = []
+        intervals = []
+        zeros = []
         for start, end, step in search_specs:
             prev_x = prev_y = None
-            x = start
+            x = float(start)
             while x <= end:
                 try:
                     y = self._eval(x, func)
                 except Exception:
-                    prev_x = prev_y = None; x = round(x + step, 10); continue
+                    prev_x = prev_y = None
+                    x = round(x + step, 10)
+                    continue
                 if not math.isfinite(y):
-                    prev_x = prev_y = None; x = round(x + step, 10); continue
+                    prev_x = prev_y = None
+                    x = round(x + step, 10)
+                    continue
                 if abs(y) < 1e-12:
                     zeros.append((x, step))
-                if prev_y is not None and prev_y * y < 0:
+                if prev_y is not None and math.isfinite(prev_y) and prev_y * y < 0:
                     intervals.append((prev_x, x))
                     if len(intervals) >= 32:
                         break
@@ -654,7 +926,7 @@ class RootFindingPage(QWidget):
         if zeros and prefer_zero:
             zx, st = sorted(zeros, key=lambda z: abs(z[0]))[0]
             return zx - st, zx + st, intervals, zeros
-        best = sorted(intervals, key=lambda ab: (abs(sum(ab) / 2), abs(ab[1] - ab[0])))[0]
+        best = sorted(intervals, key=lambda ab: (abs(sum(ab) / 2.0), abs(ab[1] - ab[0])))[0]
         return best[0], best[1], intervals, zeros
 
     def _determine_plot_range(self, func, base_min, base_max):
@@ -662,16 +934,19 @@ class RootFindingPage(QWidget):
             res = self._suggest_interval_core(func, prefer_zero=False)
             if res:
                 a, b, intervals, _ = res
-                xs = [a, b] + [v for pair in intervals for v in pair]
-                x_min = min(xs) - 2; x_max = max(xs) + 2
+                xs = [a, b]
+                for ia, ib in intervals:
+                    xs.extend([ia, ib])
+                x_min = min(xs) - 2.0
+                x_max = max(xs) + 2.0
             else:
                 x_min, x_max = base_min, base_max
-            if x_max - x_min < 10:
-                mid = (x_min + x_max) / 2
-                x_min, x_max = mid - 5, mid + 5
-            return max(-100, x_min), min(100, x_max)
+            if x_max - x_min < 10.0:
+                mid = (x_min + x_max) / 2.0
+                x_min, x_max = mid - 5.0, mid + 5.0
+            return max(-100.0, x_min), min(100.0, x_max)
         except Exception:
-            return base_min - 2, base_max + 2
+            return base_min - 2.0, base_max + 2.0
 
     def _set_method(self, name):
         self.current_method = name
@@ -699,12 +974,51 @@ class RootFindingPage(QWidget):
             self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=13, va="center")
         self.preview_fig.tight_layout(); self.preview_canvas.draw_idle()
 
-    def _to_mathtext(self, s):
-        tmp = s.replace("π", "pi").replace(" ", "")
-        tmp = re.sub(r"sqrt\(([^)]+)\)", r"\\sqrt{\1}", tmp)
-        tmp = re.sub(r"([A-Za-z0-9\)]+)\^([A-Za-z0-9\(\-]+)", r"\1^{\2}", tmp)
-        tmp = tmp.replace("*", "")
-        return tmp
+    def _to_mathtext(self, s: str) -> str:
+        expr = math_utils.format_function_display(s)
+        return self._normalize_exponents(expr)
+
+    def _normalize_exponents(self, expr: str) -> str:
+        out = []
+        i = 0
+        n = len(expr)
+        special_tokens = {
+            "x²": "x^(2)",
+            "x³": "x^(3)",
+            "^": "^(",
+            "e": "e",
+            "e^x": "e^(",
+        }
+        while i < n:
+            ch = expr[i]
+            if ch == "^" and i + 1 < n:
+                i += 1
+                if expr[i] == "(":
+                    depth = 1
+                    start = i + 1
+                    j = start
+                    while j < n and depth:
+                        if expr[j] == "(":
+                            depth += 1
+                        elif expr[j] == ")":
+                            depth -= 1
+                        j += 1
+                    out.append("^{")
+                    out.append(expr[start:j - 1])
+                    out.append("}")
+                    i = j
+                else:
+                    start = i
+                    while start < n and (expr[start].isalnum() or expr[start] in "._πe"):
+                        start += 1
+                    out.append("^{")
+                    out.append(expr[i:start])
+                    out.append("}")
+                    i = start
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
 
     def plot_function(self, explicit=False):
         func = self.func.text().strip()
@@ -758,27 +1072,52 @@ class InicioPage(QWidget):
         self.colors = colors
         self.tabs = tabs
         layout = QVBoxLayout(self); layout.setContentsMargins(24,24,24,24); layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         title = QLabel("Suite de Álgebra Computacional")
-        title.setStyleSheet(f"color:{colors['accent']};"); title.setFont(QtGui.QFont("Segoe UI", 26, QtGui.QFont.Bold))
+        title.setStyleSheet(f"color:{colors['accent']};")
+        title.setFont(QtGui.QFont("Segoe UI", 26, QtGui.QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
         subtitle = QLabel("Seleccione el módulo")
-        subtitle.setStyleSheet(f"color:{colors['text_secondary']};"); subtitle.setFont(QtGui.QFont("Segoe UI", 12))
-        layout.addWidget(title, alignment=Qt.AlignLeft)
-        layout.addWidget(subtitle, alignment=Qt.AlignLeft)
-        grid = QGridLayout(); grid.setHorizontalSpacing(8); grid.setVerticalSpacing(8)
-        layout.addLayout(grid)
+        subtitle.setStyleSheet(f"color:{colors['text_secondary']};")
+        subtitle.setFont(QtGui.QFont("Segoe UI", 12))
+        subtitle.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title, alignment=Qt.AlignHCenter)
+        layout.addWidget(subtitle, alignment=Qt.AlignHCenter)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
+        grid.setAlignment(Qt.AlignCenter)
+        grid_widget = QWidget()
+        grid_widget.setLayout(grid)
+        layout.addWidget(grid_widget, alignment=Qt.AlignHCenter)
+
         def mk_btn(text, tab_index, primary=False):
-            btn = QPushButton(text); btn.setMinimumHeight(44)
-            style_primary = f"background:{colors['accent']}; color:black; border:0; border-radius:8px; padding:10px 16px; font-weight:bold;"
-            style_secondary = f"background:{colors['secondary_bg']}; color:{colors['text']}; border:0; border-radius:8px; padding:10px 16px;"
-            btn.setStyleSheet(style_primary if primary else style_secondary)
-            btn.clicked.connect(lambda: self.tabs.setCurrentIndex(tab_index))
+            btn = QPushButton(text)
+            btn.setMinimumSize(240, 70)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(
+                f"""
+                QPushButton {{
+                    background:{colors['accent'] if primary else colors['button_secondary']};
+                    color:{'black' if primary else colors['text']};
+                    border-radius:12px;
+                    font-weight:bold;
+                    padding:16px 24px;
+                    font-size:18px;
+                }}
+                QPushButton:hover {{
+                    background:{colors['accent']};
+                    color:black;
+                }}
+                """
+            )
+            btn.clicked.connect(lambda: tabs.setCurrentIndex(tab_index))
             return btn
+
         grid.addWidget(mk_btn("Matrices", 1, True), 0, 0)
-        grid.addWidget(mk_btn("Gauss‑Jordan", 2, True), 0, 1)
-        grid.addWidget(mk_btn("Métodos Numéricos", 3, False), 1, 0)
-        grid.addWidget(QWidget(), 1, 1)
-        grid.setColumnStretch(0, 1); grid.setColumnStretch(1, 1)
-        grid.setRowStretch(2, 1)
+        grid.addWidget(mk_btn("Gauss‑Jordan", 2, False), 1, 0)
+        grid.addWidget(mk_btn("Métodos Numéricos", 3, False), 2, 0)
+        grid.setRowStretch(3, 1)
 
 class MainWindow(QMainWindow):
     def __init__(self):
