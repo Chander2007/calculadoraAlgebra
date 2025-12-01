@@ -1173,7 +1173,7 @@ class RootFindingPage(QWidget):
         self.last_params = {}
         main = QVBoxLayout(self); main.setContentsMargins(24, 24, 24, 24); main.setSpacing(16)
 
-        left = QVBoxLayout(); left.setSpacing(12)
+        left = QVBoxLayout(); left.setSpacing(12); left.setAlignment(Qt.AlignTop)
         title = QLabel("Configuración")
         title.setStyleSheet(f"color:{self.colors['text']};")
         title.setFont(QtGui.QFont("Segoe UI", 18, QtGui.QFont.Bold))
@@ -1264,6 +1264,7 @@ class RootFindingPage(QWidget):
         left_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         layout_top = QHBoxLayout(); layout_top.setContentsMargins(0, 0, 0, 0)
         layout_top.addWidget(left_widget)
+        layout_top.setAlignment(left_widget, Qt.AlignTop)
         layout_top.addLayout(right)
         layout_top.setStretch(0, 5)
         layout_top.setStretch(1, 7)
@@ -2469,9 +2470,74 @@ class MainWindow(QMainWindow):
         self.resize(1280, 840)
 
         tabs = QTabWidget()
+
+        home = QWidget()
+        home_layout = QVBoxLayout(home); home_layout.setContentsMargins(24,24,24,24); home_layout.setSpacing(18); home_layout.setAlignment(Qt.AlignTop)
+
+        hero = QFrame(); hero.setObjectName("homeHero")
+        hero.setStyleSheet(
+            f"""
+            QFrame#homeHero {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {self.colors['secondary_bg']}, stop:1 rgba(255,149,0,0.18));
+                border: 1px solid rgba(255,255,255,0.10);
+                border-radius: 16px;
+            }}
+            """
+        )
+        hero_layout = QVBoxLayout(hero); hero_layout.setContentsMargins(18,18,18,18); hero_layout.setSpacing(6); hero_layout.setAlignment(Qt.AlignTop)
+        title = QLabel("Calculadora de Álgebra")
+        title.setStyleSheet(f"color:{self.colors['accent']};")
+        title.setFont(QtGui.QFont("Segoe UI", 28, QtGui.QFont.Bold))
+        subtitle = QLabel("Selecciona una sección para comenzar")
+        subtitle.setStyleSheet(f"color:{self.colors['text_secondary']};")
+        hero_layout.addWidget(title, alignment=Qt.AlignLeft)
+        hero_layout.addWidget(subtitle, alignment=Qt.AlignLeft)
+        home_layout.addWidget(hero)
+
+        options_card = QFrame(); options_card.setObjectName("homeOptions")
+        options_card.setStyleSheet(
+            f"""
+            QFrame#homeOptions {{
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 16px;
+            }}
+            """
+        )
+        options_layout = QVBoxLayout(options_card); options_layout.setContentsMargins(18,18,18,18); options_layout.setSpacing(14); options_layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        btn_matrices = QPushButton("🧮  Matrices"); btn_sis = QPushButton("∑  Sistema de ecuaciones lineales"); btn_root = QPushButton("√  Métodos numéricos")
+        for b in (btn_matrices, btn_sis, btn_root):
+            b.setCursor(Qt.PointingHandCursor)
+            b.setMinimumHeight(48)
+            b.setFixedWidth(420)
+            b.setStyleSheet(
+                f"""
+                QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {self.colors['secondary_bg']}, stop:1 rgba(255,149,0,0.16)); color:{self.colors['text']}; border-radius:12px; padding:12px 16px; border:1px solid rgba(255,255,255,0.10); text-align:left; }}
+                QPushButton:hover {{ background: rgba(255,255,255,0.10); }}
+                QPushButton:pressed {{ background: rgba(255,255,255,0.14); }}
+                """
+            )
+            options_layout.addWidget(b, alignment=Qt.AlignHCenter)
+            info = QLabel(" ")
+            info.setStyleSheet(f"color:{self.colors['text_secondary']};")
+            options_layout.addWidget(info, alignment=Qt.AlignHCenter)
+        home_layout.addWidget(options_card)
+
+        try:
+            from PySide6.QtWidgets import QGraphicsDropShadowEffect
+            sh1 = QGraphicsDropShadowEffect(hero); sh1.setBlurRadius(20); sh1.setColor(QtGui.QColor(0,0,0,80)); sh1.setOffset(0,4); hero.setGraphicsEffect(sh1)
+            sh2 = QGraphicsDropShadowEffect(options_card); sh2.setBlurRadius(20); sh2.setColor(QtGui.QColor(0,0,0,80)); sh2.setOffset(0,4); options_card.setGraphicsEffect(sh2)
+        except Exception:
+            pass
+
+        tabs.addTab(home, "Inicio")
         tabs.addTab(MatricesPage(self.colors, self), "Matrices")
         tabs.addTab(GaussJordanPage(self.colors, self), "Sistema de ecuaciones lineales")
         tabs.addTab(RootFindingPage(self.colors, self), "Métodos numéricos")
+
+        btn_matrices.clicked.connect(lambda: tabs.setCurrentIndex(1))
+        btn_sis.clicked.connect(lambda: tabs.setCurrentIndex(2))
+        btn_root.clicked.connect(lambda: tabs.setCurrentIndex(3))
 
         self.setCentralWidget(tabs)
 
