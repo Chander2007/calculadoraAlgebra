@@ -2592,8 +2592,8 @@ class MainWindow(QMainWindow):
         )
         hero_layout = QVBoxLayout(hero); hero_layout.setContentsMargins(18,18,18,18); hero_layout.setSpacing(6); hero_layout.setAlignment(Qt.AlignTop)
         title = QLabel("Calculadora de Álgebra")
-        title.setStyleSheet(f"color:{self.colors['accent']};")
-        title.setFont(QtGui.QFont("Segoe UI", 28, QtGui.QFont.Bold))
+        title.setStyleSheet(f"color:{self.colors['accent']}; letter-spacing:0.5px;")
+        title.setFont(QtGui.QFont("Segoe UI", 36, QtGui.QFont.Bold))
         subtitle = QLabel("Selecciona una sección para comenzar")
         subtitle.setStyleSheet(f"color:{self.colors['text_secondary']};")
         hero_layout.addWidget(title, alignment=Qt.AlignLeft)
@@ -2614,11 +2614,12 @@ class MainWindow(QMainWindow):
         btn_matrices = QPushButton("🧮  Matrices"); btn_sis = QPushButton("∑  Sistema de ecuaciones lineales"); btn_root = QPushButton("√  Métodos numéricos")
         for b in (btn_matrices, btn_sis, btn_root):
             b.setCursor(Qt.PointingHandCursor)
-            b.setMinimumHeight(48)
-            b.setFixedWidth(420)
+            b.setMinimumHeight(56)
+            b.setFixedWidth(460)
+            b.setFont(QtGui.QFont("Segoe UI", 14))
             b.setStyleSheet(
                 f"""
-                QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {self.colors['secondary_bg']}, stop:1 rgba(255,149,0,0.16)); color:{self.colors['text']}; border-radius:12px; padding:12px 16px; border:1px solid rgba(255,255,255,0.10); text-align:left; }}
+                QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 {self.colors['secondary_bg']}, stop:1 rgba(255,149,0,0.16)); color:{self.colors['text']}; border-radius:14px; padding:14px 18px; border:1px solid rgba(255,255,255,0.10); text-align:left; }}
                 QPushButton:hover {{ background: rgba(255,255,255,0.10); }}
                 QPushButton:pressed {{ background: rgba(255,255,255,0.14); }}
                 """
