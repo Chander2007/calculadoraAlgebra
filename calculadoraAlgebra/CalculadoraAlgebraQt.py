@@ -1,6 +1,6 @@
 import sys
 from PySide6 import QtGui
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox
 from PySide6.QtCore import Qt
 from fractions import Fraction
 import math
@@ -8,8 +8,17 @@ import numpy as np
 import re
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
+import sympy as sp
 from matrix_core import Matrix, fraction_to_str
 import operations_sum, operations_subtract, operations_multiply, operations_determinant, operations_cofactor, operations_gauss, root_bisection, root_falsepos, math_utils
+
+DEFAULT_COLORS = {
+    "accent": "#FF9500",
+    "text": "#F2F2F7",
+    "text_secondary": "#8E8E93",
+    "secondary_bg": "rgba(28, 28, 30, 0.85)",
+    "matrix_bg": "rgba(44, 44, 46, 0.92)",
+}
 
 def parse_fraction(text: str) -> Fraction:
     s = text.strip()
@@ -45,7 +54,7 @@ class MatricesPage(QWidget):
         title.setFont(QtGui.QFont("Segoe UI", 22, QtGui.QFont.Bold))
         layout.addWidget(title, alignment=Qt.AlignLeft)
 
-        wrapper = QHBoxLayout(); wrapper.setAlignment(Qt.AlignCenter)
+        wrapper = QHBoxLayout(); wrapper.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         layout.addLayout(wrapper)
 
         control_card = QFrame(); control_card.setObjectName("matrixControlsCard")
@@ -58,42 +67,103 @@ class MatricesPage(QWidget):
             }
             """
         )
-        control_card.setFixedWidth(640)
+        control_card.setFixedWidth(760)
         card = QVBoxLayout(control_card); card.setContentsMargins(18, 18, 18, 18); card.setSpacing(14)
         wrapper.addWidget(control_card)
 
-        self.operation = QComboBox()
-        self.operation.addItems(["Suma", "Resta", "Multiplicación", "Determinante", "Cofactor"])
-        self.operation.setFixedWidth(220)
+        self.expr_input = QLineEdit()
+        self.expr_input.setPlaceholderText("Expresión (ej. 2A+3B, A-B, A+2A)")
+        self.expr_input.setFixedWidth(320)
+        self.expr_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         self.view_mode = QComboBox()
         self.view_mode.addItems(["Apilada", "Lado a lado"])
-        self.view_mode.setFixedWidth(140)
+        self.view_mode.setFixedWidth(170)
+        self.view_mode.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.view_mode.setCursor(Qt.PointingHandCursor)
 
-        self.spin_rows = QSpinBox(); self.spin_rows.setRange(1, 12); self.spin_rows.setValue(self.rows); self.spin_rows.setFixedWidth(70)
-        self.spin_colsA = QSpinBox(); self.spin_colsA.setRange(1, 12); self.spin_colsA.setValue(self.colsA); self.spin_colsA.setFixedWidth(70)
-        self.spin_rowsB = QSpinBox(); self.spin_rowsB.setRange(1, 12); self.spin_rowsB.setValue(self.rowsB); self.spin_rowsB.setFixedWidth(70)
-        self.spin_colsB = QSpinBox(); self.spin_colsB.setRange(1, 12); self.spin_colsB.setValue(self.colsB); self.spin_colsB.setFixedWidth(70)
+        combo_style = f"""
+            QComboBox {{
+                color: {self.colors['text']};
+                background-color: {self.colors['secondary_bg']};
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                border-radius: 14px;
+                padding: 6px 14px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border-left: 1px solid rgba(255, 255, 255, 0.18);
+            }}
+            QComboBox::down-arrow {{
+                width: 0;
+                height: 0;
+                margin-right: 10px;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-top: 7px solid {self.colors['accent']};
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {self.colors['matrix_bg']};
+                color: {self.colors['text']};
+                selection-background-color: {self.colors['accent']};
+                selection-color: #000000;
+            }}
+        """
+        line_style = f"""
+            QLineEdit {{
+                color: {self.colors['text']};
+                background-color: {self.colors['secondary_bg']};
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                border-radius: 14px;
+                padding: 6px 14px;
+            }}
+        """
+        self.expr_input.setStyleSheet(line_style)
+        self.view_mode.setStyleSheet(combo_style)
 
-        card = QVBoxLayout(control_card); card.setContentsMargins(18, 18, 18, 18); card.setSpacing(14)
-        wrapper.addWidget(control_card)
+        spin_style = f"""
+            QSpinBox {{
+                color: {self.colors['text']};
+                background-color: {self.colors['matrix_bg']};
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                border-radius: 8px;
+                padding: 4px 8
+            }}
+        """
+        self.spin_rows = QSpinBox(); self.spin_rows.setRange(1, 10); self.spin_rows.setValue(self.rows); self.spin_rows.setStyleSheet(spin_style); self.spin_rows.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_colsA = QSpinBox(); self.spin_colsA.setRange(1, 10); self.spin_colsA.setValue(self.colsA); self.spin_colsA.setStyleSheet(spin_style); self.spin_colsA.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_rowsB = QSpinBox(); self.spin_rowsB.setRange(1, 10); self.spin_rowsB.setValue(self.rowsB); self.spin_rowsB.setStyleSheet(spin_style); self.spin_rowsB.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_colsB = QSpinBox(); self.spin_colsB.setRange(1, 10); self.spin_colsB.setValue(self.colsB); self.spin_colsB.setStyleSheet(spin_style); self.spin_colsB.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        for spin in (self.spin_rows, self.spin_colsA, self.spin_rowsB, self.spin_colsB):
+            spin.hide()
 
-        top_row = QHBoxLayout(); top_row.setSpacing(10)
-        lbl_operation = QLabel("Operación:"); lbl_operation.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        top_row.addWidget(lbl_operation)
-        top_row.addWidget(self.operation)
-        top_row.addSpacing(12)
-        top_row.addWidget(QLabel("Vista:"))
-        top_row.addWidget(self.view_mode)
-        top_row.addStretch(1)
-        card.addLayout(top_row)
+        # Operaciones: barra superior (crear antes de usar en toolbar)
+        self.basic_op = QComboBox(); self.basic_op.addItems(["Expresión", "Suma", "Resta", "Multiplicación", "Escalar"])
+        self.basic_op.setFixedWidth(160); self.basic_op.setCursor(Qt.PointingHandCursor); self.basic_op.setStyleSheet(combo_style)
+        self.adv_op = QComboBox(); self.adv_op.addItems(["Ninguna", "Transpuesta", "Inversa", "Diagonal Superior", "Diagonal Inferior", "Determinante", "Cofactor"])
+        self.adv_op.setFixedWidth(170); self.adv_op.setCursor(Qt.PointingHandCursor); self.adv_op.setStyleSheet(combo_style)
+        self.scalar_input = QLineEdit(); self.scalar_input.setPlaceholderText("k"); self.scalar_input.setFixedWidth(70); self.scalar_input.setStyleSheet(line_style)
+        self.scalar_input.hide()
 
-        dims = QGridLayout(); dims.setHorizontalSpacing(12); dims.setVerticalSpacing(10)
-        dims.addWidget(QLabel("Filas (A):"), 0, 0); dims.addWidget(self.spin_rows, 0, 1)
-        dims.addWidget(QLabel("Cols (A):"), 0, 2); dims.addWidget(self.spin_colsA, 0, 3)
-        dims.addWidget(QLabel("Filas (B):"), 1, 0); dims.addWidget(self.spin_rowsB, 1, 1)
-        dims.addWidget(QLabel("Cols (B):"), 1, 2); dims.addWidget(self.spin_colsB, 1, 3)
-        card.addLayout(dims)
+        toolbar = QGridLayout(); toolbar.setHorizontalSpacing(4); toolbar.setVerticalSpacing(4)
+        # Fila 1: Básicas y Avanzadas en la misma columna de pares (label/combos)
+        toolbar.addWidget(QLabel("Básicas:"), 0, 0)
+        toolbar.addWidget(self.basic_op, 0, 1)
+        toolbar.addWidget(QLabel("Avanzadas:"), 0, 2)
+        toolbar.addWidget(self.adv_op, 0, 3)
+        toolbar.addWidget(self.scalar_input, 0, 4)
+        # Fila 2: Expresión y Vista exactamente debajo de sus columnas
+        lbl_operation = QLabel("Expresión:"); lbl_operation.setStyleSheet(f"color:{self.colors['text_secondary']}; font-weight:600;")
+        toolbar.addWidget(lbl_operation, 1, 0)
+        self.expr_input.setFixedWidth(200)
+        toolbar.addWidget(self.expr_input, 1, 1)
+        lbl_view = QLabel("Vista:"); lbl_view.setStyleSheet(f"color:{self.colors['text_secondary']}; font-weight:600;")
+        toolbar.addWidget(lbl_view, 1, 2)
+        toolbar.addWidget(self.view_mode, 1, 3)
+        toolbar.setColumnStretch(1, 2); toolbar.setColumnStretch(3, 1)
+        card.addLayout(toolbar)
 
         btns = QHBoxLayout(); btns.setSpacing(10); btns.setAlignment(Qt.AlignRight)
         self.btn_generate = QPushButton("Generar Tablas")
@@ -106,16 +176,20 @@ class MatricesPage(QWidget):
         layout.addLayout(btns)
         self.body = QVBoxLayout(); self.body.setSpacing(16); layout.addLayout(self.body)
         self.view_mode.currentTextChanged.connect(self._on_view_mode)
-        self.view_mode.setCurrentText("Lado a lado")
+        self.view_mode.setCurrentIndex(1)
         self.btn_generate.clicked.connect(self.generate_tables)
         self.btn_clear.clicked.connect(self.clear_all)
-        self.btn_solve.clicked.connect(self.solve_operation)
+        self.btn_solve.clicked.connect(self.solve_expression)
 
         self.spin_rows.valueChanged.connect(lambda _: self.generate_tables())
         self.spin_colsA.valueChanged.connect(lambda _: self.generate_tables())
         self.spin_rowsB.valueChanged.connect(lambda _: self.generate_tables())
         self.spin_colsB.valueChanged.connect(lambda _: self.generate_tables())
+        # Elementos ya colocados en toolbar
+
+        self.basic_op.currentTextChanged.connect(lambda t: self.scalar_input.setVisible(t == "Escalar"))
         self.apply_palette()
+        self.generate_tables()
 
     def apply_palette(self):
         self.setStyleSheet(f"""
@@ -138,17 +212,39 @@ class MatricesPage(QWidget):
 
     def _set_table_rows(self, table: QTableWidget, target: int):
         while table.rowCount() < target:
-            table.insertRow(table.rowCount())
+            new_row = table.rowCount()
+            table.insertRow(new_row)
+            for c in range(table.columnCount()):
+                if not table.item(new_row, c):
+                    table.setItem(new_row, c, QTableWidgetItem(""))
         while table.rowCount() > target and table.rowCount() > 1:
             table.removeRow(table.rowCount() - 1)
         self._auto_resize_table(table)
 
     def _set_table_columns(self, table: QTableWidget, target: int):
         while table.columnCount() < target:
-            table.insertColumn(table.columnCount())
+            new_col = table.columnCount()
+            table.insertColumn(new_col)
+            for r in range(table.rowCount()):
+                if not table.item(r, new_col):
+                    table.setItem(r, new_col, QTableWidgetItem(""))
         while table.columnCount() > target and table.columnCount() > 1:
             table.removeColumn(table.columnCount() - 1)
         self._auto_resize_table(table)
+
+    def _adjust_table_rows(self, table: QTableWidget, spin: QSpinBox, delta: int):
+        new_value = max(1, spin.value() + delta)
+        spin.blockSignals(True)
+        spin.setValue(new_value)
+        spin.blockSignals(False)
+        self._set_table_rows(table, new_value)
+
+    def _adjust_table_cols(self, table: QTableWidget, spin: QSpinBox, delta: int):
+        new_value = max(1, spin.value() + delta)
+        spin.blockSignals(True)
+        spin.setValue(new_value)
+        spin.blockSignals(False)
+        self._set_table_columns(table, new_value)
 
     def generate_tables(self):
         self.rows = self.spin_rows.value()
@@ -159,50 +255,86 @@ class MatricesPage(QWidget):
 
     def build_body(self, stacked: bool):
         self._clear_layout(self.body)
+        # QTabWidget interno
+        self.inner_tabs = QTabWidget()
+        self.inner_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.inner_tabs.setStyleSheet(
+            f"""
+            QTabWidget::pane {{ border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; }}
+            QTabBar::tab {{ background: rgba(255,255,255,0.06); color: {self.colors['text']}; padding: 6px 12px; border-radius: 10px; margin: 2px; }}
+            QTabBar::tab:selected {{ background: {self.colors['accent']}; color: black; }}
+            QTabBar::tab:hover {{ background: rgba(255,255,255,0.10); }}
+            """
+        )
+        self.body.addWidget(self.inner_tabs)
+
+        # Tab 1: Matrices
+        self.tab_matrices = QWidget(); self.tab_matrices_layout = QVBoxLayout(self.tab_matrices); self.tab_matrices_layout.setSpacing(12); self.tab_matrices_layout.setContentsMargins(10,10,10,10); self.tab_matrices_layout.setAlignment(Qt.AlignTop)
         self.tableA = QTableWidget(self.rows, self.colsA)
         self.tableB = QTableWidget(self.rowsB, self.colsB)
         for table in (self.tableA, self.tableB):
-            table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            table.setMinimumHeight(220)
+            table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            table.setMinimumHeight(180)
             table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
             table.verticalHeader().setDefaultSectionSize(32)
             table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         sectionA = QVBoxLayout(); sectionA.setSpacing(8)
         sectionA.addWidget(QLabel("Matriz A")); sectionA.addWidget(self.tableA)
-        controlsA = QHBoxLayout(); controlsA.setSpacing(6); controlsA.setAlignment(Qt.AlignLeft)
+        controlsA = QHBoxLayout(); controlsA.setSpacing(6); controlsA.setContentsMargins(0, 0, 0, 0); controlsA.setAlignment(Qt.AlignLeft)
         btn_a_sub_row = QPushButton("− Fila"); btn_a_add_row = QPushButton("+ Fila")
         btn_a_sub_col = QPushButton("− Col"); btn_a_add_col = QPushButton("+ Col")
         for b in (btn_a_sub_row, btn_a_add_row, btn_a_sub_col, btn_a_add_col):
-            b.setFixedSize(90, 32); b.setCursor(Qt.PointingHandCursor); controlsA.addWidget(b)
-        controlsA.addStretch(1); sectionA.addLayout(controlsA)
+            b.setFixedSize(74, 26); b.setCursor(Qt.PointingHandCursor); controlsA.addWidget(b)
+        sectionA.addLayout(controlsA)
 
         sectionB = QVBoxLayout(); sectionB.setSpacing(8)
         sectionB.addWidget(QLabel("Matriz B")); sectionB.addWidget(self.tableB)
-        controlsB = QHBoxLayout(); controlsB.setSpacing(6); controlsB.setAlignment(Qt.AlignLeft)
+        controlsB = QHBoxLayout(); controlsB.setSpacing(6); controlsB.setContentsMargins(0, 0, 0, 0); controlsB.setAlignment(Qt.AlignLeft)
         btn_b_sub_row = QPushButton("− Fila"); btn_b_add_row = QPushButton("+ Fila")
         btn_b_sub_col = QPushButton("− Col"); btn_b_add_col = QPushButton("+ Col")
         for b in (btn_b_sub_row, btn_b_add_row, btn_b_sub_col, btn_b_add_col):
-            b.setFixedSize(90, 32); b.setCursor(Qt.PointingHandCursor); controlsB.addWidget(b)
-        controlsB.addStretch(1); sectionB.addLayout(controlsB)
+            b.setFixedSize(74, 26); b.setCursor(Qt.PointingHandCursor); controlsB.addWidget(b)
+        sectionB.addLayout(controlsB)
 
-        containerA = QWidget(); containerA.setLayout(sectionA)
-        containerB = QWidget(); containerB.setLayout(sectionB)
+        self.containerA = QWidget(); self.containerA.setLayout(sectionA)
+        self.containerB = QWidget(); self.containerB.setLayout(sectionB)
         if stacked:
-            matrices_layout = QVBoxLayout(); matrices_layout.setSpacing(16)
-            matrices_layout.addWidget(containerA); matrices_layout.addWidget(containerB)
+            matrices_layout = QVBoxLayout(); matrices_layout.setSpacing(12)
+            matrices_layout.addWidget(self.containerA); matrices_layout.addWidget(self.containerB)
         else:
-            matrices_layout = QHBoxLayout(); matrices_layout.setSpacing(24)
-            matrices_layout.addWidget(containerA, 1); matrices_layout.addWidget(containerB, 1)
-        self.body.addLayout(matrices_layout)
+            matrices_layout = QHBoxLayout(); matrices_layout.setSpacing(18)
+            matrices_layout.addWidget(self.containerA, 1); matrices_layout.addWidget(self.containerB, 1)
+            matrices_layout.setStretch(0, 1); matrices_layout.setStretch(1, 1)
+        matrices_layout.setAlignment(Qt.AlignTop)
+        self.matrices_layout = matrices_layout
+        matrices_card = QFrame(); matrices_card.setObjectName("matricesCard")
+        matrices_card.setStyleSheet("""
+            QFrame#matricesCard { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; }
+        """)
+        matrices_card_lay = QVBoxLayout(matrices_card); matrices_card_lay.setContentsMargins(12,12,12,12); matrices_card_lay.setSpacing(10); matrices_card_lay.setAlignment(Qt.AlignTop)
+        matrices_card_lay.addLayout(matrices_layout)
+        try:
+            from PySide6.QtWidgets import QGraphicsDropShadowEffect
+            shadow = QGraphicsDropShadowEffect(matrices_card); shadow.setBlurRadius(16); shadow.setColor(QtGui.QColor(0,0,0,64)); shadow.setOffset(0,3)
+            matrices_card.setGraphicsEffect(shadow)
+        except Exception:
+            pass
+        self.tab_matrices_layout.addWidget(matrices_card)
+        self.tab_matrices_layout.addStretch(1)
 
-        result_box = QVBoxLayout()
-        self.result_table = QTableWidget(0, 0)
-        self.result_table.verticalHeader().setVisible(False)
-        self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        result_box.addWidget(QLabel("Resultado")); result_box.addWidget(self.result_table)
-        self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(160)
-        result_box.addWidget(QLabel("Detalle")); result_box.addWidget(self.log, 1)
-        self.body.addLayout(result_box)
+        self.inner_tabs.addTab(self.tab_matrices, "Matrices")
+
+        # Tab 2: Paso a Paso
+        self.tab_steps = QWidget(); steps_container_layout = QVBoxLayout(self.tab_steps); steps_container_layout.setContentsMargins(8,8,8,8); steps_container_layout.setAlignment(Qt.AlignTop)
+        self.scroll_area = QScrollArea(); self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_container = QWidget(); self.steps_layout = QVBoxLayout(scroll_container)
+        self.steps_layout.setContentsMargins(8, 8, 8, 8); self.steps_layout.setSpacing(10); self.steps_layout.setAlignment(Qt.AlignTop)
+        self.scroll_area.setWidget(scroll_container)
+        steps_container_layout.addWidget(self.scroll_area)
+        self.inner_tabs.addTab(self.tab_steps, "Paso a Paso")
+
+        # Resultado Final se muestra dentro de Paso a Paso; se elimina pestaña dedicada
 
         self._auto_resize_table(self.tableA); self._auto_resize_table(self.tableB)
         btn_a_add_row.clicked.connect(lambda: self._adjust_table_rows(self.tableA, self.spin_rows, 1))
@@ -216,7 +348,9 @@ class MatricesPage(QWidget):
         self._auto_resize_table(self.tableA)
         self._auto_resize_table(self.tableB)
 
-        result_box.addStretch(1)
+        self.steps_layout.addStretch(1)
+        self.adv_op.currentTextChanged.connect(self._update_matrix_visibility)
+        self._update_matrix_visibility()
 
     def read_matrix(self, table) -> Matrix:
         rows = table.rowCount(); cols = table.columnCount(); data = []
@@ -228,57 +362,342 @@ class MatricesPage(QWidget):
             data.append(row)
         return Matrix(data)
 
-    def set_result_matrix(self, mat: Matrix):
-        self.result_table.setRowCount(mat.rows); self.result_table.setColumnCount(mat.cols)
+    def _update_matrix_visibility(self):
+        show_b = self.adv_op.currentText() == "Ninguna"
+        if hasattr(self, 'containerB'):
+            self.containerB.setVisible(show_b)
+
+    def _matrix_scale(self, mat: Matrix, k: Fraction) -> Matrix:
+        rows, cols = mat.shape
+        out = [[mat[i, j] * k for j in range(cols)] for i in range(rows)]
+        return Matrix(out)
+
+    def _matrix_add(self, A: Matrix, B: Matrix) -> Matrix:
+        if A.shape != B.shape:
+            raise ValueError("Dimensiones no coinciden para suma")
+        rows, cols = A.shape
+        out = [[A[i, j] + B[i, j] for j in range(cols)] for i in range(rows)]
+        return Matrix(out)
+
+    def _to_sympy(self, mat: Matrix) -> sp.Matrix:
+        def to_rat(x):
+            if isinstance(x, Fraction):
+                return sp.Rational(x.numerator, x.denominator)
+            try:
+                return sp.Rational(str(x))
+            except Exception:
+                return sp.Float(float(x))
+        return sp.Matrix([[to_rat(mat[i, j]) for j in range(mat.cols)] for i in range(mat.rows)])
+
+    def _fmt(self, x) -> str:
+        try:
+            val = float(x)
+        except Exception:
+            try:
+                val = float(str(x))
+            except Exception:
+                return str(x)
+        s = f"{val:.6f}"
+        s = s.rstrip('0').rstrip('.')
+        return s
+
+    def _matrix_widget(self, mat: Matrix, compact=True) -> QTableWidget:
+        tbl = QTableWidget(mat.rows, mat.cols)
+        tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        tbl.verticalHeader().setVisible(False)
+        tbl.horizontalHeader().setVisible(False)
+        tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        cell_w = 72 if compact else 96
+        cell_h = 24 if compact else 30
+        tbl.verticalHeader().setDefaultSectionSize(cell_h)
+        for c in range(mat.cols):
+            tbl.setColumnWidth(c, cell_w)
         for r in range(mat.rows):
             for c in range(mat.cols):
-                self.result_table.setItem(r, c, QTableWidgetItem(fraction_to_str(mat[r, c])))
+                tbl.setItem(r, c, QTableWidgetItem(self._fmt(mat[r, c])))
+        tbl.setFixedHeight(cell_h * mat.rows + 8)
+        tbl.setFixedWidth(cell_w * mat.cols + 8)
+        tbl.setStyleSheet(f"QTableWidget {{ background-color: {self.colors['matrix_bg']}; color: {self.colors['text']}; gridline-color: rgba(255,255,255,0.12); }}")
+        return tbl
 
-    def solve_operation(self):
-        op = self.operation.currentText()
-        self.log.clear()
-        try:
-            if op in ("Suma", "Resta", "Multiplicación"):
-                matA = self.read_matrix(self.tableA); matB = self.read_matrix(self.tableB)
-                if op == "Suma":
-                    res, logs = operations_sum.add_matrices(matA, matB)
-                elif op == "Resta":
-                    res, logs = operations_subtract.subtract_matrices(matA, matB)
+    def _add_step_panel(self, title: str, explanation: str, mat: Matrix):
+        from PySide6.QtWidgets import QGroupBox
+        gb = QGroupBox(title)
+        gb.setStyleSheet(
+            f"""
+            QGroupBox {{ border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; margin-top: 12px; color:{self.colors['accent']}; font-weight:700; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 6px; }}
+            """
+        )
+        row = QHBoxLayout(gb); row.setContentsMargins(10,10,10,10); row.setSpacing(12)
+        expl = QLabel(explanation); expl.setWordWrap(True); expl.setStyleSheet(f"color:{self.colors['text']};")
+        row.addWidget(expl, 2)
+        tbl = self._matrix_widget(mat, compact=False)
+        row.addWidget(tbl, 3)
+        self.steps_layout.insertWidget(self.steps_layout.count()-1, gb)
+
+    def _parse_expression(self, s: str):
+        t = s.replace(" ", "")
+        if not t:
+            raise ValueError("Ingresa una expresión, ej. 2A+3B")
+        pattern = re.compile(r"([+-]?)((?:\d+(?:/\d+)?(?:\.\d+)?))?([AB])")
+        pos = 0; terms = []
+        for m in pattern.finditer(t):
+            if m.start() != pos:
+                raise ValueError("Expresión inválida. Usa términos como 2A+3B")
+            sign = -1 if m.group(1) == '-' else 1
+            num = m.group(2)
+            var = m.group(3)
+            coef = Fraction(sign) * (parse_fraction(num) if num else Fraction(1))
+            terms.append((coef, var))
+            pos = m.end()
+        if pos != len(t):
+            raise ValueError("Expresión contiene símbolos no soportados")
+        return terms
+
+    def _mul(self, A: Matrix, B: Matrix) -> Matrix:
+        rowsA, colsA = A.shape; rowsB, colsB = B.shape
+        if colsA != rowsB:
+            raise ValueError("Dimensiones no compatibles para multiplicación")
+        out = []
+        for i in range(rowsA):
+            row = []
+            for j in range(colsB):
+                s = Fraction(0)
+                for k in range(colsA):
+                    s += A[i, k] * B[k, j]
+                row.append(s)
+            out.append(row)
+        return Matrix(out)
+
+    def _transpose(self, M: Matrix) -> Matrix:
+        return Matrix([[M[j, i] for j in range(M.rows)] for i in range(M.cols)])
+
+    def _inverse(self, M: Matrix) -> Matrix:
+        if M.rows != M.cols:
+            raise ValueError("La matriz debe ser cuadrada para inversa")
+        sm = self._to_sympy(M)
+        inv = sm.inv()
+        data = []
+        for i in range(inv.rows):
+            row = []
+            for j in range(inv.cols):
+                val = inv[i, j]
+                if val.is_Rational:
+                    row.append(Fraction(int(val.p), int(val.q)))
                 else:
-                    res, logs = operations_multiply.multiply_matrices(matA, matB)
-                self.set_result_matrix(res); self.log.appendPlainText("\n".join(logs))
-            elif op == "Determinante":
-                matA = self.read_matrix(self.tableA)
-                det, logs = operations_determinant.determinant_with_log(matA.data)
-                self.result_table.setRowCount(1); self.result_table.setColumnCount(1)
-                self.result_table.setItem(0, 0, QTableWidgetItem(fraction_to_str(det)))
-                self.log.appendPlainText("\n".join(logs))
-            elif op == "Cofactor":
-                matA = self.read_matrix(self.tableA)
-                res, logs = operations_cofactor.cofactor_matrix(matA)
-                self.set_result_matrix(res); self.log.appendPlainText("\n".join(logs))
+                    row.append(Fraction.from_float(float(val)))
+            data.append(row)
+        return Matrix(data)
+
+    def _upper(self, M: Matrix) -> Matrix:
+        return Matrix([[M[i, j] if i <= j else Fraction(0) for j in range(M.cols)] for i in range(M.rows)])
+
+    def _lower(self, M: Matrix) -> Matrix:
+        return Matrix([[M[i, j] if i >= j else Fraction(0) for j in range(M.cols)] for i in range(M.rows)])
+
+    def _set_final(self, mat: Matrix):
+        from PySide6.QtWidgets import QGroupBox
+        gb = QGroupBox("Resultado Final")
+        gb.setStyleSheet(
+            f"""
+            QGroupBox {{ border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; margin-top: 12px; color:{self.colors['accent']}; font-weight:800; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; }}
+            """
+        )
+        lay = QHBoxLayout(gb); lay.setContentsMargins(14,14,14,14)
+        tbl = self._matrix_widget(mat, compact=False)
+        lay.addWidget(tbl)
+        # insertar al final del scroll de Paso a Paso, antes del stretch
+        self.steps_layout.insertWidget(self.steps_layout.count()-1, gb)
+
+    def _tokenize(self, s: str):
+        t = s.replace(" ", "")
+        tokens = []
+        i = 0
+        while i < len(t):
+            ch = t[i]
+            if ch in '+-*':
+                tokens.append(ch); i += 1; continue
+            if ch in 'AB':
+                tokens.append(ch); i += 1; continue
+            # número (entero/frac/decimal)
+            j = i
+            while j < len(t) and (t[j].isdigit() or t[j] in '/.'): j += 1
+            if j == i:
+                raise ValueError("Símbolo inválido en expresión")
+            tokens.append(t[i:j]); i = j
+        return tokens
+
+    def _eval_expression(self, tokens, A: Matrix, B: Matrix):
+        self._clear_steps()
+        def clone_zero(rows, cols):
+            return Matrix([[Fraction(0) for _ in range(cols)] for _ in range(rows)])
+        def read_factor(idx):
+            coef = Fraction(1)
+            var = None
+            # opcional coeficiente
+            if idx < len(tokens) and (tokens[idx][0].isdigit()):
+                coef = parse_fraction(tokens[idx]); idx += 1
+            if idx >= len(tokens) or tokens[idx] not in ('A','B'):
+                raise ValueError("Se esperaba A o B")
+            var = tokens[idx]; idx += 1
+            base = A if var == 'A' else B
+            # pasos por celda de escalado
+            rows, cols = base.shape
+            partial = clone_zero(rows, cols)
+            for i in range(rows):
+                for j in range(cols):
+                    partial[i, j] = base[i, j] * coef
+                    self._add_step_panel(f"Paso {self._next_step}", f"({var})[{i+1},{j+1}] * {self._fmt(coef)} = {self._fmt(partial[i,j])}", partial)
+                    self._next_step += 1
+            scaled = partial
+            return scaled, idx
+        def read_term(idx):
+            mat, idx = read_factor(idx)
+            while idx < len(tokens) and tokens[idx] == '*':
+                idx += 1
+                right, idx = read_factor(idx)
+                # multiplicación por celda
+                rowsA, colsA = mat.shape; rowsB, colsB = right.shape
+                if colsA != rowsB:
+                    raise ValueError("Dimensiones no compatibles para multiplicación")
+                res = clone_zero(rowsA, colsB)
+                for i in range(rowsA):
+                    for j in range(colsB):
+                        s = Fraction(0); terms = []
+                        for k in range(colsA):
+                            prod = mat[i, k] * right[k, j]
+                            s += prod; terms.append(f"{self._fmt(mat[i,k])}·{self._fmt(right[k,j])}")
+                        res[i, j] = s
+                        self._add_step_panel(f"Paso {self._next_step}", f"res[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}", res)
+                        self._next_step += 1
+                mat = res
+            return mat, idx
+        # suma/resta con prioridad
+        i = 0
+        result = None
+        sign = 1
+        while i < len(tokens):
+            if tokens[i] == '+':
+                sign = 1; i += 1; continue
+            if tokens[i] == '-':
+                sign = -1; i += 1; continue
+            term, i = read_term(i)
+            if sign == -1:
+                rows, cols = term.shape
+                for r in range(rows):
+                    for c in range(cols):
+                        term[r, c] = term[r, c] * Fraction(-1)
+                        self._add_step_panel(f"Paso {self._next_step}", f"Cambiar signo término[{r+1},{c+1}]", term)
+                        self._next_step += 1
+            prev = result
+            result = term if result is None else self._matrix_add(result, term)
+            if prev is None:
+                self._add_step_panel(f"Paso {self._next_step}", "Iniciar acumulado", result); self._next_step += 1
+            else:
+                # suma por celda
+                rows, cols = result.shape
+                for r in range(rows):
+                    for c in range(cols):
+                        val = prev[r, c] + term[r, c]
+                        prev[r, c] = val
+                        self._add_step_panel(f"Paso {self._next_step}", f"acum[{r+1},{c+1}] = {self._fmt(prev[r,c]-term[r,c])} + {self._fmt(term[r,c])} = {self._fmt(val)}", prev)
+                        self._next_step += 1
+                result = prev
+        return result
+
+    def solve_expression(self):
+        try:
+            matA = self.read_matrix(self.tableA)
+            matB = self.read_matrix(self.tableB)
+            expr = self.expr_input.text().strip()
+            self._clear_steps()
+            self._next_step = 1
+            # Si hay expresión, evaluarla con precedencia * antes que +/‑
+            if expr:
+                tokens = self._tokenize(expr)
+                res = self._eval_expression(tokens, matA, matB)
+                self._set_final(res)
+                self.inner_tabs.setCurrentIndex(1)
+                return
+            # Operaciones básicas sin expresión
+            basic = self.basic_op.currentText()
+            adv = self.adv_op.currentText()
+            base = matA
+            if basic == "Suma":
+                # suma por celda
+                res = Matrix([[Fraction(0) for _ in range(matA.cols)] for _ in range(matA.rows)])
+                for i in range(matA.rows):
+                    for j in range(matA.cols):
+                        res[i, j] = matA[i, j] + matB[i, j]
+                        self._add_step_panel(f"Paso {self._next_step}", f"A[{i+1},{j+1}] + B[{i+1},{j+1}] = {self._fmt(res[i,j])}", res); self._next_step += 1
+            elif basic == "Resta":
+                res = Matrix([[Fraction(0) for _ in range(matA.cols)] for _ in range(matA.rows)])
+                for i in range(matA.rows):
+                    for j in range(matA.cols):
+                        res[i, j] = matA[i, j] - matB[i, j]
+                        self._add_step_panel(f"Paso {self._next_step}", f"A[{i+1},{j+1}] − B[{i+1},{j+1}] = {self._fmt(res[i,j])}", res); self._next_step += 1
+            elif basic == "Multiplicación":
+                # multiplicación por celda
+                res = Matrix([[Fraction(0) for _ in range(matB.cols)] for _ in range(matA.rows)])
+                for i in range(matA.rows):
+                    for j in range(matB.cols):
+                        s = Fraction(0); terms = []
+                        for k in range(matA.cols):
+                            prod = matA[i, k] * matB[k, j]
+                            s += prod; terms.append(f"{self._fmt(matA[i,k])}·{self._fmt(matB[k,j])}")
+                        res[i, j] = s
+                        self._add_step_panel(f"Paso {self._next_step}", f"res[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}", res); self._next_step += 1
+            elif basic == "Escalar":
+                k = parse_fraction(self.scalar_input.text() or "1")
+                res = Matrix([[Fraction(0) for _ in range(base.cols)] for _ in range(base.rows)])
+                for i in range(base.rows):
+                    for j in range(base.cols):
+                        res[i, j] = base[i, j] * k
+                        self._add_step_panel(f"Paso {self._next_step}", f"A[{i+1},{j+1}] · {self._fmt(k)} = {self._fmt(res[i,j])}", res); self._next_step += 1
+            else:
+                res = base
+            # Operaciones avanzadas
+            if adv == "Transpuesta":
+                res = self._transpose(res); self._add_step_panel(f"Paso {self._next_step}", "Transponer matriz (res^T)", res); self._next_step += 1
+            elif adv == "Inversa":
+                res = self._inverse(res); self._add_step_panel(f"Paso {self._next_step}", "Calcular inversa (res^{-1})", res); self._next_step += 1
+            elif adv == "Diagonal Superior":
+                res = self._upper(res); self._add_step_panel(f"Paso {self._next_step}", "Tomar triangular superior", res); self._next_step += 1
+            elif adv == "Diagonal Inferior":
+                res = self._lower(res); self._add_step_panel(f"Paso {self._next_step}", "Tomar triangular inferior", res); self._next_step += 1
+            elif adv == "Determinante":
+                det, _logs = operations_determinant.determinant_with_log(matA.data)
+                res = Matrix([[det]])
+                self._add_step_panel(f"Paso {self._next_step}", "Determinante de A", res); self._next_step += 1
+            elif adv == "Cofactor":
+                res, _logs = operations_cofactor.cofactor_matrix(matA)
+                self._add_step_panel(f"Paso {self._next_step}", "Matriz de cofactores de A", res); self._next_step += 1
+            self._set_final(res)
+            self.inner_tabs.setCurrentIndex(1)
         except Exception as e:
-            self.log.appendPlainText(f"Error: {e}")
+            self._show_error_dialog(str(e))
 
     def clear_all(self):
-        for tbl in (self.tableA, self.tableB, self.result_table):
+        for tbl in (self.tableA, self.tableB):
             tbl.clear(); tbl.setRowCount(0); tbl.setColumnCount(0)
-        self.log.clear()
+        self._clear_steps()
 
     def _add_row(self, table: QTableWidget):
         r = table.rowCount(); table.insertRow(r)
         for c in range(table.columnCount()):
-            table.setItem(r, c, QTableWidgetItem("0"))
+            table.setItem(r, c, QTableWidgetItem(""))
+
+    def _add_col(self, table: QTableWidget):
+        c = table.columnCount(); table.insertColumn(c)
+        for r in range(table.rowCount()):
+            table.setItem(r, c, QTableWidgetItem(""))
 
     def _sub_row(self, table: QTableWidget):
         r = table.rowCount()
         if r>0:
             table.removeRow(r-1)
-
-    def _add_col(self, table: QTableWidget):
-        c = table.columnCount(); table.insertColumn(c)
-        for r in range(table.rowCount()):
-            table.setItem(r, c, QTableWidgetItem("0"))
 
     def _sub_col(self, table: QTableWidget):
         c = table.columnCount()
@@ -295,6 +714,21 @@ class MatricesPage(QWidget):
                 sub = item.layout()
                 if sub:
                     self._clear_layout(sub)
+
+    def _clear_steps(self):
+        if hasattr(self, 'steps_layout') and self.steps_layout is not None:
+            while self.steps_layout.count() > 1:
+                item = self.steps_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+
+    def _show_error_dialog(self, message: str):
+        dlg = QMessageBox(self)
+        dlg.setIcon(QMessageBox.Critical)
+        dlg.setWindowTitle("Error")
+        dlg.setText(message)
+        dlg.exec()
 
     def _auto_resize_table(self, table: QTableWidget):
         if not table:
@@ -360,7 +794,11 @@ class GaussJordanPage(QWidget):
             if status == 'unique':
                 self.log.appendPlainText("Solución única:")
                 for i, val in enumerate(result, start=1):
-                    self.log.appendPlainText(f"x{i} = {fraction_to_str(val)}")
+                    try:
+                        sval = f"{float(val):.6f}".rstrip('0').rstrip('.')
+                    except Exception:
+                        sval = str(val)
+                    self.log.appendPlainText(f"x{i} = {sval}")
             elif status == 'infinite':
                 self.log.appendPlainText("Infinitas soluciones (variables libres)")
                 self.log.appendPlainText("\n".join(result))
@@ -1055,129 +1493,639 @@ class RootFindingPage(QWidget):
             report.append(f"{idx:>2}. [{ia:.6f}, {ib:.6f}]")
         if zeros:
             report.append(""); report.append("Posibles raíces exactas:")
-            for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0])), 1):
-                report.append(f"{idx:>2}. x ≈ {zx:.6f}  (usar [{zx-step:.6f}, {zx+step:.6f}])")
-        self.log.setPlainText("\n".join(report))
+            for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0]))):
+                report.append(f"{idx+1}. {zx:.6f} (paso {step:.1e})")
+        self.log.appendPlainText("\n".join(report))
 
     def _clear(self):
-        self.func.clear(); self.a.setValue(-1.0); self.b.setValue(1.0); self.tol.setValue(1e-4); self.max_iter.setValue(100)
-        self.log.clear(); self.last_root = None; self.last_func = ""; self.last_params = {}
-        self.plot_ax.clear(); self.plot_ax.axhline(0, color="#666", linestyle="--", linewidth=1)
-        self.plot_ax.axvline(0, color="#666", linestyle="--", linewidth=1); self.canvas.draw_idle()
-        self.update_preview()
+        self.func.clear()
+        self.log.clear()
+        self.plot_ax.clear()
+        self.plot_ax.set_axis_off()
+        self.canvas.draw_idle()
+        self.last_root = None
+        self.last_func = ""
+        self.last_params = {}
+        self._set_method("Bisección")
 
-class InicioPage(QWidget):
-    def __init__(self, colors, tabs, parent=None):
-        super().__init__(parent)
-        self.colors = colors
-        self.tabs = tabs
-        layout = QVBoxLayout(self); layout.setContentsMargins(24,24,24,24); layout.setSpacing(16)
-        layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
-        title = QLabel("Suite de Álgebra Computacional")
-        title.setStyleSheet(f"color:{colors['accent']};")
-        title.setFont(QtGui.QFont("Segoe UI", 26, QtGui.QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        subtitle = QLabel("Seleccione el módulo")
-        subtitle.setStyleSheet(f"color:{colors['text_secondary']};")
-        subtitle.setFont(QtGui.QFont("Segoe UI", 12))
-        subtitle.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title, alignment=Qt.AlignHCenter)
-        layout.addWidget(subtitle, alignment=Qt.AlignHCenter)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(16)
-        grid.setAlignment(Qt.AlignCenter)
-        grid_widget = QWidget()
-        grid_widget.setLayout(grid)
-        layout.addWidget(grid_widget, alignment=Qt.AlignHCenter)
+    def _eval(self, x, func):
+        return math_utils.evaluate_function(x, func)
+    
+    def _evaluate_vector(self, xs, func):
+        return math_utils.evaluate_function_vectorized(xs, func)
+    
+    def _derivative(self, x, func, h=1e-6):
+        return (self._eval(x + h, func) - self._eval(x - h, func)) / (2.0 * h)
+    
+    def _plot_function(self, method, func, params, root):
+        self.plot_ax.clear()
+        try:
+            if method in ("Bisección", "Falsa Posición"):
+                base_min, base_max = params.get("a", -5.0), params.get("b", 5.0)
+            elif method == "Secante":
+                base_min = min(params.get("x0", -5.0), params.get("x1", 5.0))
+                base_max = max(params.get("x0", -5.0), params.get("x1", 5.0))
+            else:
+                x0 = params.get("x0", 0.0)
+                base_min, base_max = x0 - 5.0, x0 + 5.0
+            if base_min == base_max:
+                base_min -= 5.0
+                base_max += 5.0
+            x_min, x_max = self._determine_plot_range(func, base_min, base_max)
+            xs = np.linspace(x_min, x_max, 4000)
+            ys = self._evaluate_vector(xs, func)
+            ys = np.where(np.isfinite(ys), ys, np.nan)
+            self.plot_ax.plot(xs, ys, color="#2F80ED", linewidth=2.0, label=f"f(x) = {math_utils.format_function_display(func)}")
+            self.plot_ax.axhline(0, color="#666", linestyle="--", linewidth=1.2, alpha=0.7)
+            self.plot_ax.axvline(0, color="#666", linestyle="--", linewidth=1.2, alpha=0.7)
 
-        def mk_btn(text, tab_index, primary=False):
-            btn = QPushButton(text)
-            btn.setMinimumSize(240, 70)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background:{colors['accent'] if primary else colors['button_secondary']};
-                    color:{'black' if primary else colors['text']};
-                    border-radius:12px;
-                    font-weight:bold;
-                    padding:16px 24px;
-                    font-size:18px;
-                }}
-                QPushButton:hover {{
-                    background:{colors['accent']};
-                    color:black;
-                }}
-                """
-            )
-            btn.clicked.connect(lambda: tabs.setCurrentIndex(tab_index))
-            return btn
+            if method in ("Bisección", "Falsa Posición"):
+                a_line, b_line = params.get("a"), params.get("b")
+                if a_line is not None:
+                    self.plot_ax.axvline(a_line, color="#30D158", linestyle=":", linewidth=1.4, label=f"a = {a_line:.3f}")
+                    self.plot_ax.plot(a_line, self._eval(a_line, func), "o", color="#30D158", markersize=6)
+                if b_line is not None:
+                    self.plot_ax.axvline(b_line, color="#FF453A", linestyle=":", linewidth=1.4, label=f"b = {b_line:.3f}")
+                    self.plot_ax.plot(b_line, self._eval(b_line, func), "o", color="#FF453A", markersize=6)
+                original = params.get("original")
+                if isinstance(original, (tuple, list)) and len(original) == 2:
+                    oa, ob = original
+                    if oa is not None and ob is not None and (oa, ob) != (a_line, b_line):
+                        self.plot_ax.axvspan(min(oa, ob), max(oa, ob), color="#FF9F0A", alpha=0.08, label=f"Intervalo original [{oa:.3f}, {ob:.3f}]")
+            elif method == "Secante":
+                x0, x1 = params.get("x0"), params.get("x1")
+                if x0 is not None and x1 is not None:
+                    self.plot_ax.scatter([x0, x1], [self._eval(x0, func), self._eval(x1, func)], color="#30D158", marker="o", label="Puntos iniciales")
+            elif method == "Newton-Raphson":
+                x0 = params.get("x0")
+                if x0 is not None:
+                    self.plot_ax.plot(x0, self._eval(x0, func), "o", color="#FF9F0A", markersize=7, label=f"x₀ = {x0:.3f}")
 
-        grid.addWidget(mk_btn("Matrices", 1, True), 0, 0)
-        grid.addWidget(mk_btn("Gauss‑Jordan", 2, False), 1, 0)
-        grid.addWidget(mk_btn("Métodos Numéricos", 3, False), 2, 0)
-        grid.setRowStretch(3, 1)
+            if root is not None and math.isfinite(root):
+                fr = self._eval(root, func)
+                if math.isfinite(fr):
+                    self.plot_ax.plot(root, fr, "o", color="#BB33FF", markersize=9, label=f"Raíz ≈ {root:.4f}")
+                    self.plot_ax.axvline(root, color="#BB33FF", linestyle="--", linewidth=1.2, alpha=0.8)
+
+            finite_mask = np.isfinite(ys)
+            if np.any(finite_mask):
+                dy = np.gradient(np.nan_to_num(ys, nan=0.0), xs)
+                vertex_x, vertex_y = [], []
+                current = []
+                for idx in range(len(xs)):
+                    if finite_mask[idx]:
+                        current.append(idx)
+                    elif current:
+                        if len(current) > 1:
+                            segment = current
+                            deriv = dy[segment]
+                            for j in range(1, len(deriv)):
+                                if deriv[j - 1] == 0:
+                                    continue
+                                if deriv[j - 1] > 0 >= deriv[j] or deriv[j - 1] < 0 <= deriv[j]:
+                                    k = segment[j]
+                                    vertex_x.append(xs[k])
+                                    vertex_y.append(ys[k])
+                        current = []
+                if current and len(current) > 1:
+                    deriv = dy[current]
+                    for j in range(1, len(deriv)):
+                        if deriv[j - 1] == 0:
+                            continue
+                        if deriv[j - 1] > 0 >= deriv[j] or deriv[j - 1] < 0 <= deriv[j]:
+                            k = current[j]
+                            vertex_x.append(xs[k])
+                            vertex_y.append(ys[k])
+                if vertex_x:
+                    self.plot_ax.plot(vertex_x, vertex_y, "D", color="#FF9F0A", markersize=6, label="Vértices")
+
+                try:
+                    low, high = np.nanpercentile(ys, [1, 99])
+                    if np.isfinite(low) and np.isfinite(high) and high > low:
+                        pad = 0.1 * (high - low)
+                        self.plot_ax.set_ylim(low - pad, high + pad)
+                except Exception:
+                    pass
+
+            self.plot_ax.set_xlim(x_min, x_max)
+            self.plot_ax.set_xlabel("x")
+            self.plot_ax.set_ylabel("f(x)")
+            self.plot_ax.grid(True, linestyle="--", alpha=0.35)
+            self.plot_ax.legend()
+        except Exception as err:
+            self._show_error_dialog(str(err))
+            self.plot_ax.clear()
+            self.plot_ax.text(0.5, 0.5, f"No se pudo graficar:\n{err}", ha="center", va="center", color="#FF453A")
+            self.plot_ax.set_axis_off()
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
+    def _show_error_dialog(self, message):
+        dlg = QMessageBox(self)
+        dlg.setIcon(QMessageBox.Critical)
+        dlg.setWindowTitle("Error al graficar")
+        dlg.setText(message)
+        dlg.exec()
+
+    def _auto_interval(self, func, a, b):
+        res = self._suggest_interval_core(func)
+        if res is None:
+            return None
+        return res[0], res[1]
+
+    def _suggest_interval_core(self, func, prefer_zero=True):
+        search_specs = [(-10, 10, 0.1), (-50, 50, 0.2), (-100, 100, 0.5)]
+        intervals = []
+        zeros = []
+        for start, end, step in search_specs:
+            prev_x = prev_y = None
+            x = float(start)
+            while x <= end:
+                try:
+                    y = self._eval(x, func)
+                except Exception:
+                    prev_x = prev_y = None
+                    x = round(x + step, 10)
+                    continue
+                if not math.isfinite(y):
+                    prev_x = prev_y = None
+                    x = round(x + step, 10)
+                    continue
+                if abs(y) < 1e-12:
+                    zeros.append((x, step))
+                if prev_y is not None and math.isfinite(prev_y) and prev_y * y < 0:
+                    intervals.append((prev_x, x))
+                    if len(intervals) >= 32:
+                        break
+                prev_x, prev_y = x, y
+                x = round(x + step, 10)
+            if intervals or zeros:
+                break
+        if not intervals and not zeros:
+            return None
+        if zeros and prefer_zero:
+            zx, st = sorted(zeros, key=lambda z: abs(z[0]))[0]
+            return zx - st, zx + st, intervals, zeros
+        best = sorted(intervals, key=lambda ab: (abs(sum(ab) / 2.0), abs(ab[1] - ab[0])))[0]
+        return best[0], best[1], intervals, zeros
+
+    def _determine_plot_range(self, func, base_min, base_max):
+        try:
+            res = self._suggest_interval_core(func, prefer_zero=False)
+            if res:
+                a, b, intervals, _ = res
+                xs = [a, b]
+                for ia, ib in intervals:
+                    xs.extend([ia, ib])
+                x_min = min(xs) - 2.0
+                x_max = max(xs) + 2.0
+            else:
+                x_min, x_max = base_min, base_max
+            if x_max - x_min < 10.0:
+                mid = (x_min + x_max) / 2.0
+                x_min, x_max = mid - 5.0, mid + 5.0
+            return max(-100.0, x_min), min(100.0, x_max)
+        except Exception:
+            return base_min - 2.0, base_max + 2.0
+
+    def _set_method(self, name):
+        self.current_method = name
+        for method, btn in self.method_buttons.items():
+            if method == name:
+                btn.setStyleSheet(f"background:{self.colors['accent']}; color:black; border-radius:6px; padding:8px 12px; font-weight:bold;")
+            else:
+                btn.setStyleSheet(f"background:{self.colors['secondary_bg']}; color:{self.colors['text']}; border-radius:6px; padding:8px 12px;")
+        self.b.setEnabled(name != "Newton-Raphson")
+
+    def insert_text(self, value):
+        if value == "<DEL>":
+            self.func.backspace()
+            return
+        pos = self.func.cursorPosition()
+        text = self.func.text()
+        self.func.setText(text[:pos] + value + text[pos:])
+        self.func.setCursorPosition(pos + len(value))
+
+    def update_preview(self):
+        self.preview_ax.clear(); self.preview_ax.axis("off")
+        func = self.func.text().strip()
+        if func:
+            latex = self._to_mathtext(func)
+            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=13, va="center")
+        self.preview_fig.tight_layout(); self.preview_canvas.draw_idle()
+
+    def _to_mathtext(self, s: str) -> str:
+        expr = math_utils.format_function_display(s)
+        return self._normalize_exponents(expr)
+
+    def _normalize_exponents(self, expr: str) -> str:
+        out = []
+        i = 0
+        n = len(expr)
+        special_tokens = {
+            "x²": "x^(2)",
+            "x³": "x^(3)",
+            "^": "^(",
+            "e": "e",
+            "e^x": "e^(",
+        }
+        while i < n:
+            ch = expr[i]
+            if ch == "^" and i + 1 < n:
+                i += 1
+                if expr[i] == "(":
+                    depth = 1
+                    start = i + 1
+                    j = start
+                    while j < n and depth:
+                        if expr[j] == "(":
+                            depth += 1
+                        elif expr[j] == ")":
+                            depth -= 1
+                        j += 1
+                    out.append("^{")
+                    out.append(expr[start:j - 1])
+                    out.append("}")
+                    i = j
+                else:
+                    start = i
+                    while start < n and (expr[start].isalnum() or expr[start] in "._πe"):
+                        start += 1
+                    out.append("^{")
+                    out.append(expr[i:start])
+                    out.append("}")
+                    i = start
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
+
+    def plot_function(self, explicit=False):
+        func = self.func.text().strip()
+        if not func:
+            self.log.appendPlainText("Ingresa una función para graficar.")
+            return
+        method = self.current_method
+        if explicit or not self.last_params or self.last_func != func:
+            if method in ("Bisección", "Falsa Posición"):
+                params = {"a": self.a.value(), "b": self.b.value()}
+            elif method == "Newton-Raphson":
+                params = {"x0": self.a.value()}
+            else:
+                params = {"x0": self.a.value(), "x1": self.b.value()}
+        else:
+            params = {k: v for k, v in self.last_params.items() if k != "method"}
+            method = self.last_params.get("method", method)
+        root = self.last_root if self.last_func == func else None
+        self._plot_function(method, func, params, root)
+
+    def suggest_interval(self):
+        func = self.func.text().strip()
+        if not func:
+            self.log.appendPlainText("Ingresa una función para sugerir intervalos.")
+            return
+        res = self._suggest_interval_core(func)
+        if res is None:
+            self.log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
+            return
+        a, b, intervals, zeros = res
+        self.a.setValue(a); self.b.setValue(b)
+        report = ["Intervalos con cambio de signo:"]
+        for idx, (ia, ib) in enumerate(intervals, 1):
+            report.append(f"{idx:>2}. [{ia:.6f}, {ib:.6f}]")
+        if zeros:
+            report.append(""); report.append("Posibles raíces exactas:")
+            for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0]))):
+                report.append(f"{idx+1}. {zx:.6f} (paso {step:.1e})")
+        self.log.appendPlainText("\n".join(report))
+
+    def _clear(self):
+        self.func.clear()
+        self.log.clear()
+        self.plot_ax.clear()
+        self.plot_ax.set_axis_off()
+        self.canvas.draw_idle()
+        self.last_root = None
+        self.last_func = ""
+        self.last_params = {}
+        self._set_method("Bisección")
+
+    def _eval(self, x, func):
+        return math_utils.evaluate_function(x, func)
+    
+    def _evaluate_vector(self, xs, func):
+        return math_utils.evaluate_function_vectorized(xs, func)
+    
+    def _derivative(self, x, func, h=1e-6):
+        return (self._eval(x + h, func) - self._eval(x - h, func)) / (2.0 * h)
+    
+    def _plot_function(self, method, func, params, root):
+        self.plot_ax.clear()
+        try:
+            if method in ("Bisección", "Falsa Posición"):
+                base_min, base_max = params.get("a", -5.0), params.get("b", 5.0)
+            elif method == "Secante":
+                base_min = min(params.get("x0", -5.0), params.get("x1", 5.0))
+                base_max = max(params.get("x0", -5.0), params.get("x1", 5.0))
+            else:
+                x0 = params.get("x0", 0.0)
+                base_min, base_max = x0 - 5.0, x0 + 5.0
+            if base_min == base_max:
+                base_min -= 5.0
+                base_max += 5.0
+            x_min, x_max = self._determine_plot_range(func, base_min, base_max)
+            xs = np.linspace(x_min, x_max, 4000)
+            ys = self._evaluate_vector(xs, func)
+            ys = np.where(np.isfinite(ys), ys, np.nan)
+            self.plot_ax.plot(xs, ys, color="#2F80ED", linewidth=2.0, label=f"f(x) = {math_utils.format_function_display(func)}")
+            self.plot_ax.axhline(0, color="#666", linestyle="--", linewidth=1.2, alpha=0.7)
+            self.plot_ax.axvline(0, color="#666", linestyle="--", linewidth=1.2, alpha=0.7)
+
+            if method in ("Bisección", "Falsa Posición"):
+                a_line, b_line = params.get("a"), params.get("b")
+                if a_line is not None:
+                    self.plot_ax.axvline(a_line, color="#30D158", linestyle=":", linewidth=1.4, label=f"a = {a_line:.3f}")
+                    self.plot_ax.plot(a_line, self._eval(a_line, func), "o", color="#30D158", markersize=6)
+                if b_line is not None:
+                    self.plot_ax.axvline(b_line, color="#FF453A", linestyle=":", linewidth=1.4, label=f"b = {b_line:.3f}")
+                    self.plot_ax.plot(b_line, self._eval(b_line, func), "o", color="#FF453A", markersize=6)
+                original = params.get("original")
+                if isinstance(original, (tuple, list)) and len(original) == 2:
+                    oa, ob = original
+                    if oa is not None and ob is not None and (oa, ob) != (a_line, b_line):
+                        self.plot_ax.axvspan(min(oa, ob), max(oa, ob), color="#FF9F0A", alpha=0.08, label=f"Intervalo original [{oa:.3f}, {ob:.3f}]")
+            elif method == "Secante":
+                x0, x1 = params.get("x0"), params.get("x1")
+                if x0 is not None and x1 is not None:
+                    self.plot_ax.scatter([x0, x1], [self._eval(x0, func), self._eval(x1, func)], color="#30D158", marker="o", label="Puntos iniciales")
+            elif method == "Newton-Raphson":
+                x0 = params.get("x0")
+                if x0 is not None:
+                    self.plot_ax.plot(x0, self._eval(x0, func), "o", color="#FF9F0A", markersize=7, label=f"x₀ = {x0:.3f}")
+
+            if root is not None and math.isfinite(root):
+                fr = self._eval(root, func)
+                if math.isfinite(fr):
+                    self.plot_ax.plot(root, fr, "o", color="#BB33FF", markersize=9, label=f"Raíz ≈ {root:.4f}")
+                    self.plot_ax.axvline(root, color="#BB33FF", linestyle="--", linewidth=1.2, alpha=0.8)
+
+            finite_mask = np.isfinite(ys)
+            if np.any(finite_mask):
+                dy = np.gradient(np.nan_to_num(ys, nan=0.0), xs)
+                vertex_x, vertex_y = [], []
+                current = []
+                for idx in range(len(xs)):
+                    if finite_mask[idx]:
+                        current.append(idx)
+                    elif current:
+                        if len(current) > 1:
+                            segment = current
+                            deriv = dy[segment]
+                            for j in range(1, len(deriv)):
+                                if deriv[j - 1] == 0:
+                                    continue
+                                if deriv[j - 1] > 0 >= deriv[j] or deriv[j - 1] < 0 <= deriv[j]:
+                                    k = segment[j]
+                                    vertex_x.append(xs[k])
+                                    vertex_y.append(ys[k])
+                        current = []
+                if current and len(current) > 1:
+                    deriv = dy[current]
+                    for j in range(1, len(deriv)):
+                        if deriv[j - 1] == 0:
+                            continue
+                        if deriv[j - 1] > 0 >= deriv[j] or deriv[j - 1] < 0 <= deriv[j]:
+                            k = current[j]
+                            vertex_x.append(xs[k])
+                            vertex_y.append(ys[k])
+                if vertex_x:
+                    self.plot_ax.plot(vertex_x, vertex_y, "D", color="#FF9F0A", markersize=6, label="Vértices")
+
+                try:
+                    low, high = np.nanpercentile(ys, [1, 99])
+                    if np.isfinite(low) and np.isfinite(high) and high > low:
+                        pad = 0.1 * (high - low)
+                        self.plot_ax.set_ylim(low - pad, high + pad)
+                except Exception:
+                    pass
+
+            self.plot_ax.set_xlim(x_min, x_max)
+            self.plot_ax.set_xlabel("x")
+            self.plot_ax.set_ylabel("f(x)")
+            self.plot_ax.grid(True, linestyle="--", alpha=0.35)
+            self.plot_ax.legend()
+        except Exception as err:
+            self._show_error_dialog(str(err))
+            self.plot_ax.clear()
+            self.plot_ax.text(0.5, 0.5, f"No se pudo graficar:\n{err}", ha="center", va="center", color="#FF453A")
+            self.plot_ax.set_axis_off()
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
+    def _show_error_dialog(self, message):
+        dlg = QMessageBox(self)
+        dlg.setIcon(QMessageBox.Critical)
+        dlg.setWindowTitle("Error al graficar")
+        dlg.setText(message)
+        dlg.exec()
+
+    def _auto_interval(self, func, a, b):
+        res = self._suggest_interval_core(func)
+        if res is None:
+            return None
+        return res[0], res[1]
+
+    def _suggest_interval_core(self, func, prefer_zero=True):
+        search_specs = [(-10, 10, 0.1), (-50, 50, 0.2), (-100, 100, 0.5)]
+        intervals = []
+        zeros = []
+        for start, end, step in search_specs:
+            prev_x = prev_y = None
+            x = float(start)
+            while x <= end:
+                try:
+                    y = self._eval(x, func)
+                except Exception:
+                    prev_x = prev_y = None
+                    x = round(x + step, 10)
+                    continue
+                if not math.isfinite(y):
+                    prev_x = prev_y = None
+                    x = round(x + step, 10)
+                    continue
+                if abs(y) < 1e-12:
+                    zeros.append((x, step))
+                if prev_y is not None and math.isfinite(prev_y) and prev_y * y < 0:
+                    intervals.append((prev_x, x))
+                    if len(intervals) >= 32:
+                        break
+                prev_x, prev_y = x, y
+                x = round(x + step, 10)
+            if intervals or zeros:
+                break
+        if not intervals and not zeros:
+            return None
+        if zeros and prefer_zero:
+            zx, st = sorted(zeros, key=lambda z: abs(z[0]))[0]
+            return zx - st, zx + st, intervals, zeros
+        best = sorted(intervals, key=lambda ab: (abs(sum(ab) / 2.0), abs(ab[1] - ab[0])))[0]
+        return best[0], best[1], intervals, zeros
+
+    def _determine_plot_range(self, func, base_min, base_max):
+        try:
+            res = self._suggest_interval_core(func, prefer_zero=False)
+            if res:
+                a, b, intervals, _ = res
+                xs = [a, b]
+                for ia, ib in intervals:
+                    xs.extend([ia, ib])
+                x_min = min(xs) - 2.0
+                x_max = max(xs) + 2.0
+            else:
+                x_min, x_max = base_min, base_max
+            if x_max - x_min < 10.0:
+                mid = (x_min + x_max) / 2.0
+                x_min, x_max = mid - 5.0, mid + 5.0
+            return max(-100.0, x_min), min(100.0, x_max)
+        except Exception:
+            return base_min - 2.0, base_max + 2.0
+
+    def _set_method(self, name):
+        self.current_method = name
+        for method, btn in self.method_buttons.items():
+            if method == name:
+                btn.setStyleSheet(f"background:{self.colors['accent']}; color:black; border-radius:6px; padding:8px 12px; font-weight:bold;")
+            else:
+                btn.setStyleSheet(f"background:{self.colors['secondary_bg']}; color:{self.colors['text']}; border-radius:6px; padding:8px 12px;")
+        self.b.setEnabled(name != "Newton-Raphson")
+
+    def insert_text(self, value):
+        if value == "<DEL>":
+            self.func.backspace()
+            return
+        pos = self.func.cursorPosition()
+        text = self.func.text()
+        self.func.setText(text[:pos] + value + text[pos:])
+        self.func.setCursorPosition(pos + len(value))
+
+    def update_preview(self):
+        self.preview_ax.clear(); self.preview_ax.axis("off")
+        func = self.func.text().strip()
+        if func:
+            latex = self._to_mathtext(func)
+            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=13, va="center")
+        self.preview_fig.tight_layout(); self.preview_canvas.draw_idle()
+
+    def _to_mathtext(self, s: str) -> str:
+        expr = math_utils.format_function_display(s)
+        return self._normalize_exponents(expr)
+
+    def _normalize_exponents(self, expr: str) -> str:
+        out = []
+        i = 0
+        n = len(expr)
+        special_tokens = {
+            "x²": "x^(2)",
+            "x³": "x^(3)",
+            "^": "^(",
+            "e": "e",
+            "e^x": "e^(",
+        }
+        while i < n:
+            ch = expr[i]
+            if ch == "^" and i + 1 < n:
+                i += 1
+                if expr[i] == "(":
+                    depth = 1
+                    start = i + 1
+                    j = start
+                    while j < n and depth:
+                        if expr[j] == "(":
+                            depth += 1
+                        elif expr[j] == ")":
+                            depth -= 1
+                        j += 1
+                    out.append("^{")
+                    out.append(expr[start:j - 1])
+                    out.append("}")
+                    i = j
+                else:
+                    start = i
+                    while start < n and (expr[start].isalnum() or expr[start] in "._πe"):
+                        start += 1
+                    out.append("^{")
+                    out.append(expr[i:start])
+                    out.append("}")
+                    i = start
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
+
+    def plot_function(self, explicit=False):
+        func = self.func.text().strip()
+        if not func:
+            self.log.appendPlainText("Ingresa una función para graficar.")
+            return
+        method = self.current_method
+        if explicit or not self.last_params or self.last_func != func:
+            if method in ("Bisección", "Falsa Posición"):
+                params = {"a": self.a.value(), "b": self.b.value()}
+            elif method == "Newton-Raphson":
+                params = {"x0": self.a.value()}
+            else:
+                params = {"x0": self.a.value(), "x1": self.b.value()}
+        else:
+            params = {k: v for k, v in self.last_params.items() if k != "method"}
+            method = self.last_params.get("method", method)
+        root = self.last_root if self.last_func == func else None
+        self._plot_function(method, func, params, root)
+
+    def suggest_interval(self):
+        func = self.func.text().strip()
+        if not func:
+            self.log.appendPlainText("Ingresa una función para sugerir intervalos.")
+            return
+        res = self._suggest_interval_core(func)
+        if res is None:
+            self.log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
+            return
+        a, b, intervals, zeros = res
+        self.a.setValue(a); self.b.setValue(b)
+        report = ["Intervalos con cambio de signo:"]
+        for idx, (ia, ib) in enumerate(intervals, 1):
+            report.append(f"{idx:>2}. [{ia:.6f}, {ib:.6f}]")
+        if zeros:
+            report.append(""); report.append("Posibles raíces exactas:")
+            for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0]))):
+                report.append(f"{idx+1}. {zx:.6f} (paso {step:.1e})")
+        self.log.appendPlainText("\n".join(report))
+
+    def _clear(self):
+        self.func.clear()
+        self.log.clear()
+        self.plot_ax.clear()
+        self.plot_ax.set_axis_off()
+        self.canvas.draw_idle()
+        self.last_root = None
+        self.last_func = ""
+        self.last_params = {}
+        self._set_method("Bisección")
 
 class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.colors = {
-            "background": "#2B2D42",
-            "secondary_bg": "#3C3F58",
-            "accent": "#FF9F0A",
-            "text": "#FFFFFF",
-            "text_secondary": "#E5E5E7",
-            "button_secondary": "#6C757D",
-            "matrix_bg": "#353849"
-        }
-        self.setWindowTitle("Calculadora de Álgebra (Interfaz Moderna)")
-        self.resize(1200, 850)
-        central = QWidget(); self.setCentralWidget(central)
-        v = QVBoxLayout(central); v.setContentsMargins(0,0,0,0); v.setSpacing(0)
-        self.tabs = QTabWidget()
-        self.tabs.setTabPosition(QTabWidget.North)
-        self.tabs.setMovable(False)
-        v.addWidget(self.tabs)
-        self.apply_style()
-        inicio = InicioPage(self.colors, self.tabs)
-        matrices = MatricesPage(self.colors)
-        gauss = GaussJordanPage(self.colors)
-        roots = RootFindingPage(self.colors)
-        self.tabs.addTab(inicio, "Inicio")
-        self.tabs.addTab(matrices, "Matrices")
-        self.tabs.addTab(gauss, "Gauss‑Jordan")
-        self.tabs.addTab(roots, "Raíces")
+    def __init__(self, parent=None, colors=None):
+        super().__init__(parent)
+        self.colors = colors or DEFAULT_COLORS
+        self.setWindowTitle("Calculadora de Álgebra")
+        self.resize(1280, 840)
 
-    def apply_style(self):
-        QApplication.setStyle("Fusion")
-        pal = QtGui.QPalette()
-        pal.setColor(QtGui.QPalette.Window, QtGui.QColor(self.colors["background"]))
-        pal.setColor(QtGui.QPalette.WindowText, QtGui.QColor(self.colors["text"]))
-        pal.setColor(QtGui.QPalette.Base, QtGui.QColor(self.colors["secondary_bg"]))
-        pal.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(self.colors["matrix_bg"]))
-        pal.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(self.colors["secondary_bg"]))
-        pal.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(self.colors["text"]))
-        pal.setColor(QtGui.QPalette.Text, QtGui.QColor(self.colors["text"]))
-        pal.setColor(QtGui.QPalette.Button, QtGui.QColor(self.colors["secondary_bg"]))
-        pal.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(self.colors["text"]))
-        pal.setColor(QtGui.QPalette.BrightText, Qt.red)
-        pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(self.colors["accent"]))
-        pal.setColor(QtGui.QPalette.HighlightedText, Qt.black)
-        self.setPalette(pal)
-        self.setStyleSheet(f"""
-            QTabWidget::pane {{ border: 0; background:{self.colors['background']}; }}
-            QTabBar::tab {{ background:{self.colors['secondary_bg']}; color:{self.colors['text']}; padding:10px 16px; margin:4px; border-radius:6px; }}
-            QTabBar::tab:selected {{ background:{self.colors['accent']}; color:black; }}
-            QLabel {{ color:{self.colors['text']}; }}
-            QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit {{ background:{self.colors['matrix_bg']}; color:{self.colors['text']}; border:1px solid {self.colors['secondary_bg']}; border-radius:4px; padding:4px 6px; }}
-            QPushButton {{ background:{self.colors['accent']}; color:black; border:0; border-radius:6px; padding:10px 16px; font-weight:bold; }}
-        """)
+        tabs = QTabWidget()
+        tabs.addTab(MatricesPage(self.colors, self), "Matrices")
+        tabs.addTab(GaussJordanPage(self.colors, self), "Gauss-Jordan")
+        tabs.addTab(RootFindingPage(self.colors, self), "Raíces")
 
-def main():
-    app = QApplication([])
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-    w = MainWindow()
-    w.showMaximized()
-    app.exec()
+        self.setCentralWidget(tabs)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.showMaximized()
+    sys.exit(app.exec())

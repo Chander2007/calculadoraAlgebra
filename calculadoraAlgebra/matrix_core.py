@@ -26,6 +26,22 @@ class Matrix:
         self.data[i][j] = value
 
 
+def format_matrix_lines(matrix):
+    if isinstance(matrix, Matrix):
+        data = matrix.data
+    else:
+        data = matrix
+    if not data:
+        return ["[ ]"]
+    str_rows = [[fraction_to_str(val) for val in row] for row in data]
+    widths = [max(len(row[c]) for row in str_rows) for c in range(len(str_rows[0]))]
+    lines = []
+    for row in str_rows:
+        padded = "  ".join(cell.rjust(widths[idx]) for idx, cell in enumerate(row))
+        lines.append(f"[ {padded} ]")
+    return lines
+
+
 def _determinant_step(matrix):
     """Calcula determinante por reducción (sin pasos de UI)."""
     from fractions import Fraction
