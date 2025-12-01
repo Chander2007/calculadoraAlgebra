@@ -1,6 +1,6 @@
 import sys
 from PySide6 import QtGui
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox, QDialog, QDialogButtonBox
 from PySide6.QtCore import Qt
 from fractions import Fraction
 import math
@@ -324,7 +324,7 @@ class MatricesPage(QWidget):
 
         self.inner_tabs.addTab(self.tab_matrices, "Matrices")
 
-        # Tab 2: Paso a Paso
+        # Tab 2: Procedimiento
         self.tab_steps = QWidget(); steps_container_layout = QVBoxLayout(self.tab_steps); steps_container_layout.setContentsMargins(8,8,8,8); steps_container_layout.setAlignment(Qt.AlignTop)
         self.scroll_area = QScrollArea(); self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -332,9 +332,9 @@ class MatricesPage(QWidget):
         self.steps_layout.setContentsMargins(8, 8, 8, 8); self.steps_layout.setSpacing(10); self.steps_layout.setAlignment(Qt.AlignTop)
         self.scroll_area.setWidget(scroll_container)
         steps_container_layout.addWidget(self.scroll_area)
-        self.inner_tabs.addTab(self.tab_steps, "Paso a Paso")
+        self.inner_tabs.addTab(self.tab_steps, "Procedimiento")
 
-        # Resultado Final se muestra dentro de Paso a Paso; se elimina pestaña dedicada
+        # Resultado Final se muestra dentro de Procedimiento; se elimina pestaña dedicada
 
         self._auto_resize_table(self.tableA); self._auto_resize_table(self.tableB)
         btn_a_add_row.clicked.connect(lambda: self._adjust_table_rows(self.tableA, self.spin_rows, 1))
@@ -508,7 +508,7 @@ class MatricesPage(QWidget):
         lay = QHBoxLayout(gb); lay.setContentsMargins(14,14,14,14)
         tbl = self._matrix_widget(mat, compact=False)
         lay.addWidget(tbl)
-        # insertar al final del scroll de Paso a Paso, antes del stretch
+        # insertar al final del scroll de Procedimiento, antes del stretch
         self.steps_layout.insertWidget(self.steps_layout.count()-1, gb)
 
     def _tokenize(self, s: str):
@@ -623,32 +623,63 @@ class MatricesPage(QWidget):
                 return
             # Operaciones básicas sin expresión
             basic = self.basic_op.currentText()
+            # Si el modo es "Expresión" pero no hay expresión, por defecto mostrar procedimiento de Suma
+            if basic == "Expresión":
+                basic = "Suma"
             adv = self.adv_op.currentText()
             base = matA
             if basic == "Suma":
-                # suma por celda
                 res = Matrix([[Fraction(0) for _ in range(matA.cols)] for _ in range(matA.rows)])
                 for i in range(matA.rows):
+                    self._add_step_panel(f"Paso {self._next_step} — Fila {i+1}", f"Procesar fila {i+1}", res); self._next_step += 1
                     for j in range(matA.cols):
                         res[i, j] = matA[i, j] + matB[i, j]
-                        self._add_step_panel(f"Paso {self._next_step}", f"A[{i+1},{j+1}] + B[{i+1},{j+1}] = {self._fmt(res[i,j])}", res); self._next_step += 1
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] + B[{i+1},{j+1}] = {self._fmt(matA[i,j])} + {self._fmt(matB[i,j])} = {self._fmt(res[i,j])}",
+                            res
+                        ); self._next_step += 1
+                    fila_txt = ", ".join(self._fmt(res[i, c]) for c in range(matA.cols))
+                    self._add_step_panel(f"Paso {self._next_step}", f"Resultado fila {i+1}: [{fila_txt}]", res); self._next_step += 1
             elif basic == "Resta":
                 res = Matrix([[Fraction(0) for _ in range(matA.cols)] for _ in range(matA.rows)])
                 for i in range(matA.rows):
+                    self._add_step_panel(f"Paso {self._next_step} — Fila {i+1}", f"Procesar fila {i+1}", res); self._next_step += 1
                     for j in range(matA.cols):
                         res[i, j] = matA[i, j] - matB[i, j]
-                        self._add_step_panel(f"Paso {self._next_step}", f"A[{i+1},{j+1}] − B[{i+1},{j+1}] = {self._fmt(res[i,j])}", res); self._next_step += 1
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] − B[{i+1},{j+1}] = {self._fmt(matA[i,j])} − {self._fmt(matB[i,j])} = {self._fmt(res[i,j])}",
+                            res
+                        ); self._next_step += 1
+                    fila_txt = ", ".join(self._fmt(res[i, c]) for c in range(matA.cols))
+                    self._add_step_panel(f"Paso {self._next_step}", f"Resultado fila {i+1}: [{fila_txt}]", res); self._next_step += 1
             elif basic == "Multiplicación":
-                # multiplicación por celda
                 res = Matrix([[Fraction(0) for _ in range(matB.cols)] for _ in range(matA.rows)])
                 for i in range(matA.rows):
                     for j in range(matB.cols):
-                        s = Fraction(0); terms = []
+                        s = Fraction(0)
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"Inicializar C[{i+1},{j+1}] = 0",
+                            res
+                        ); self._next_step += 1
+                        terms = []
                         for k in range(matA.cols):
                             prod = matA[i, k] * matB[k, j]
-                            s += prod; terms.append(f"{self._fmt(matA[i,k])}·{self._fmt(matB[k,j])}")
-                        res[i, j] = s
-                        self._add_step_panel(f"Paso {self._next_step}", f"res[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}", res); self._next_step += 1
+                            s += prod
+                            res[i, j] = s
+                            self._add_step_panel(
+                                f"Paso {self._next_step}",
+                                f"C[{i+1},{j+1}] += A[{i+1},{k+1}] × B[{k+1},{j+1}] = {self._fmt(matA[i,k])} × {self._fmt(matB[k,j])} → {self._fmt(s)}",
+                                res
+                            ); self._next_step += 1
+                            terms.append(f"{self._fmt(matA[i,k])}×{self._fmt(matB[k,j])}")
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"res[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}",
+                            res
+                        ); self._next_step += 1
             elif basic == "Escalar":
                 k = parse_fraction(self.scalar_input.text() or "1")
                 res = Matrix([[Fraction(0) for _ in range(base.cols)] for _ in range(base.rows)])
@@ -742,34 +773,83 @@ class GaussJordanPage(QWidget):
     def __init__(self, colors, parent=None):
         super().__init__(parent)
         self.colors = colors
-        layout = QVBoxLayout(self); layout.setContentsMargins(24,24,24,24); layout.setSpacing(16)
-        title = QLabel("Método de Gauss‑Jordan")
+        main = QVBoxLayout(self); main.setContentsMargins(24,24,24,24); main.setSpacing(16)
+        title = QLabel("Sistema de ecuaciones lineales")
         title.setStyleSheet(f"color:{colors['accent']};"); title.setFont(QtGui.QFont("Segoe UI", 22, QtGui.QFont.Bold))
-        layout.addWidget(title, alignment=Qt.AlignLeft)
-        controls = QHBoxLayout()
+        main.addWidget(title, alignment=Qt.AlignLeft)
+
+        controls_top = QHBoxLayout();
         self.spin_rows = QSpinBox(); self.spin_rows.setRange(1, 10); self.spin_rows.setValue(3)
         self.spin_cols = QSpinBox(); self.spin_cols.setRange(1, 10); self.spin_cols.setValue(3)
-        controls.addWidget(QLabel("Ecuaciones:")); controls.addWidget(self.spin_rows)
-        controls.addWidget(QLabel("Variables:")); controls.addWidget(self.spin_cols)
-        layout.addLayout(controls)
-        self.btn_generate = QPushButton("Generar Matriz Aumentada")
+        controls_top.addWidget(QLabel("Ecuaciones:")); controls_top.addWidget(self.spin_rows)
+        controls_top.addWidget(QLabel("Variables:")); controls_top.addWidget(self.spin_cols)
+        controls_top.addStretch(1)
+        main.addLayout(controls_top)
+
+        actions = QHBoxLayout(); actions.addStretch(1)
+        self.btn_generate = QPushButton("Generar matriz aumentada")
+        self.btn_equations = QPushButton("Ingresar ecuaciones…")
+        self.method_combo = QComboBox(); self.method_combo.addItems(["Gauss‑Jordan", "Gauss", "Cramer", "Sarrus"]); self.method_combo.setFixedWidth(180)
         self.btn_solve = QPushButton("Resolver"); self.btn_clear = QPushButton("Limpiar")
-        btns = QHBoxLayout(); btns.addStretch(1)
-        for b in (self.btn_generate, self.btn_solve, self.btn_clear):
-            b.setMinimumWidth(180); btns.addWidget(b)
-        layout.addLayout(btns)
+        for w in (self.btn_generate, self.btn_equations, self.method_combo, self.btn_solve, self.btn_clear):
+            actions.addWidget(w)
+        main.addLayout(actions)
+
+        layout_main = QHBoxLayout()
+        left_col = QVBoxLayout(); left_col.setSpacing(10)
         self.table = QTableWidget(3, 4)
-        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setVisible(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         for c in range(self.table.columnCount()):
             self.table.setColumnWidth(c, 100)
-        layout.addWidget(self.table)
-        self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(160)
-        layout.addWidget(QLabel("Detalle")); layout.addWidget(self.log)
+        left_col.addWidget(self.table)
+
+        lbl_det = QLabel("Procedimiento detallado"); lbl_det.setStyleSheet(f"color:{self.colors['text']};")
+        self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(280); self.log.setLineWrapMode(QPlainTextEdit.NoWrap)
+        left_col.addWidget(lbl_det)
+        left_col.addWidget(self.log)
+
+        self.result_card = QFrame(); self.result_card.setObjectName("resultCard")
+        self.result_card.setStyleSheet(
+            f"""
+            QFrame#resultCard {{
+                background: rgba(255,255,255,0.06);
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 14px;
+            }}
+            QLabel#resultTitle {{ color: {self.colors['accent']}; font-size: 18px; font-weight: 700; }}
+            QLabel#resultLabel {{ color: {self.colors['text_secondary']}; }}
+            """
+        )
+        card_lay = QVBoxLayout(self.result_card); card_lay.setContentsMargins(16,16,16,16); card_lay.setSpacing(8)
+        self.res_title = QLabel("Resultado"); self.res_title.setObjectName("resultTitle")
+        card_lay.addWidget(self.res_title)
+        self.res_status = QLabel("") ; self.res_status.setObjectName("resultLabel")
+        self.res_pivots = QLabel(""); self.res_pivots.setObjectName("resultLabel")
+        self.res_free = QLabel(""); self.res_free.setObjectName("resultLabel")
+        self.res_indep = QLabel(""); self.res_indep.setObjectName("resultLabel")
+        card_lay.addWidget(self.res_status)
+        card_lay.addWidget(self.res_pivots)
+        card_lay.addWidget(self.res_free)
+        card_lay.addWidget(self.res_indep)
+        self.res_vars = QTableWidget(0, 2)
+        self.res_vars.setHorizontalHeaderLabels(["Variable", "Valor"])
+        self.res_vars.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.res_vars.verticalHeader().setVisible(False)
+        self.res_vars.setMinimumHeight(180)
+        card_lay.addWidget(self.res_vars)
+
+        layout_main.addLayout(left_col, 3)
+        layout_main.addWidget(self.result_card, 2)
+        main.addLayout(layout_main)
+
         self.btn_generate.clicked.connect(self.generate_matrix)
         self.btn_solve.clicked.connect(self.solve)
         self.btn_clear.clicked.connect(self.clear)
+        self.btn_equations.clicked.connect(self.open_equations_dialog)
         self.setStyleSheet(f"QLabel {{ color:{self.colors['text']}; }} QTableWidget {{ background:{self.colors['matrix_bg']}; color:{self.colors['text']}; }} QPlainTextEdit {{ background:{self.colors['secondary_bg']}; color:{self.colors['text']}; }}")
+
+        self.generate_matrix()
 
     def generate_matrix(self):
         rows = self.spin_rows.value(); cols = self.spin_cols.value()
@@ -779,6 +859,7 @@ class GaussJordanPage(QWidget):
         for r in range(rows):
             for c in range(cols + 1):
                 self.table.setItem(r, c, QTableWidgetItem("0"))
+        self._set_headers(rows, cols)
 
     def solve(self):
         rows = self.table.rowCount(); cols = self.table.columnCount(); data = []
@@ -788,29 +869,290 @@ class GaussJordanPage(QWidget):
                 item = self.table.item(r, c); text = item.text() if item else "0"
                 row.append(parse_fraction(text))
             data.append(row)
+        self.log.clear()
+        method = self.method_combo.currentText()
         try:
-            status, result = operations_gauss.gauss_jordan_solve(data)
-            self.log.clear()
-            if status == 'unique':
-                self.log.appendPlainText("Solución única:")
-                for i, val in enumerate(result, start=1):
-                    try:
-                        sval = f"{float(val):.6f}".rstrip('0').rstrip('.')
-                    except Exception:
-                        sval = str(val)
-                    self.log.appendPlainText(f"x{i} = {sval}")
-            elif status == 'infinite':
-                self.log.appendPlainText("Infinitas soluciones (variables libres)")
-                self.log.appendPlainText("\n".join(result))
+            if method == "Gauss‑Jordan":
+                mat = [row[:] for row in data]
+                n = len(mat); m = len(mat[0]); n_vars = m - 1
+                pivot_cols = []
+                r = 0
+                self.log.appendPlainText("Inicio: matriz aumentada")
+                self.log.appendPlainText(self._format_matrix_lines(mat))
+                for c in range(n_vars):
+                    piv = None
+                    for i in range(r, n):
+                        if mat[i][c] != 0:
+                            piv = i; break
+                    if piv is None:
+                        self.log.appendPlainText(f"Columna {c+1} sin pivote. Variable libre x{c+1}")
+                        continue
+                    self.log.appendPlainText(f"Seleccionar pivote en columna {c+1}: fila {piv+1}")
+                    if piv != r:
+                        mat[r], mat[piv] = mat[piv], mat[r]
+                        self.log.appendPlainText(f"Intercambiar fila {r+1} con {piv+1}")
+                        self.log.appendPlainText(self._format_matrix_lines(mat))
+                    pivot = mat[r][c]
+                    if pivot != 1:
+                        for j in range(c, m):
+                            mat[r][j] = mat[r][j] / pivot
+                        self.log.appendPlainText(f"Dividir fila {r+1} por {pivot}")
+                        self.log.appendPlainText(self._format_matrix_lines(mat))
+                    for i in range(n):
+                        if i != r and mat[i][c] != 0:
+                            factor = mat[i][c]
+                            for j in range(c, m):
+                                mat[i][j] -= factor * mat[r][j]
+                            self.log.appendPlainText(f"R{i+1} = R{i+1} - {factor} * R{r+1}")
+                            self.log.appendPlainText(self._format_matrix_lines(mat))
+                    pivot_cols.append(c)
+                    r += 1
+                    if r == n:
+                        break
+                inconsistent = False
+                for i in range(n):
+                    if all(mat[i][j] == 0 for j in range(n_vars)) and mat[i][-1] != 0:
+                        inconsistent = True
+                        break
+                self.log.appendPlainText("")
+                self.log.appendPlainText("Análisis del sistema:")
+                self.log.appendPlainText(f"Columnas pivote: {[p+1 for p in pivot_cols]}")
+                free_vars = [i+1 for i in range(n_vars) if i not in pivot_cols]
+                if inconsistent:
+                    self.log.appendPlainText("El sistema es INCONSISTENTE (no tiene solución)")
+                elif len(pivot_cols) < n_vars:
+                    self.log.appendPlainText("El sistema tiene INFINITAS SOLUCIONES (variables libres)")
+                    self.log.appendPlainText(f"Variables libres: x{', x'.join(map(str, free_vars))}" if free_vars else "")
+                else:
+                    self.log.appendPlainText("El sistema tiene SOLUCIÓN ÚNICA")
+                rankA = len(pivot_cols)
+                lin_indep = "INDEPENDIENTE" if rankA == n_vars else "DEPENDIENTE"
+                self.log.appendPlainText(f"Columnas de A: {lin_indep}")
+                sol = None
+                if not inconsistent and len(pivot_cols) == n_vars:
+                    sol = [Fraction(0)] * n_vars
+                    for c in range(n_vars):
+                        row_idx = None
+                        for i in range(n):
+                            if mat[i][c] == 1 and all(mat[i][k] == 0 for k in range(n_vars) if k != c):
+                                row_idx = i; break
+                        val = mat[row_idx][-1] if row_idx is not None else Fraction(0)
+                        sol[c] = val
+                    self.log.appendPlainText("")
+                    self.log.appendPlainText("Valores de variables:")
+                    for i, val in enumerate(sol, start=1):
+                        self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
+                status_txt = "INCONSISTENTE" if inconsistent else ("INFINITAS" if len(pivot_cols) < n_vars else "ÚNICA")
+                self._update_result_panel(status_txt, pivot_cols, free_vars, lin_indep, sol)
+            elif method == "Gauss":
+                mat = [row[:] for row in data]
+                n = len(mat); m = len(mat[0])
+                n_vars = m - 1
+                self.log.appendPlainText("Inicio: matriz aumentada")
+                self.log.appendPlainText(self._format_matrix_lines(mat))
+                pivot_cols = []
+                for i in range(n_vars):
+                    piv = None
+                    for r in range(i, n):
+                        if mat[r][i] != 0:
+                            piv = r; break
+                    if piv is None:
+                        self.log.appendPlainText(f"Columna {i+1} sin pivote. Variable libre x{i+1}")
+                        continue
+                    pivot_cols.append(i)
+                    if piv != i:
+                        mat[i], mat[piv] = mat[piv], mat[i]
+                        self.log.appendPlainText(f"Intercambiar fila {i+1} con {piv+1}")
+                        self.log.appendPlainText(self._format_matrix_lines(mat))
+                    pivot = mat[i][i]
+                    for r in range(i+1, n):
+                        if mat[r][i] != 0:
+                            factor = mat[r][i] / pivot
+                            for c in range(i, m):
+                                mat[r][c] -= factor * mat[i][c]
+                            self.log.appendPlainText(f"R{r+1} = R{r+1} - {factor} * R{i+1}")
+                            self.log.appendPlainText(self._format_matrix_lines(mat))
+                inconsistent = False
+                for r in range(n):
+                    if all(mat[r][c] == 0 for c in range(n_vars)) and mat[r][-1] != 0:
+                        inconsistent = True; break
+                if inconsistent:
+                    self.log.appendPlainText("Sistema inconsistente")
+                    self._update_result_panel("INCONSISTENTE", pivot_cols, [i+1 for i in range(n_vars) if i not in pivot_cols], "DEPENDIENTE" if len(pivot_cols) < n_vars else "INDEPENDIENTE", None)
+                else:
+                    sol = [Fraction(0)] * n_vars
+                    for i in range(n_vars-1, -1, -1):
+                        s = mat[i][-1]
+                        for j in range(i+1, n_vars):
+                            s -= mat[i][j] * sol[j]
+                        sol[i] = s / (mat[i][i] if mat[i][i] != 0 else Fraction(1))
+                    self.log.appendPlainText("Solución por Gauss:")
+                    for i, val in enumerate(sol, start=1):
+                        self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
+                    self._update_result_panel("ÚNICA" if len(pivot_cols) == n_vars else "INFINITAS", pivot_cols, [i+1 for i in range(n_vars) if i not in pivot_cols], "INDEPENDIENTE" if len(pivot_cols) == n_vars else "DEPENDIENTE", sol)
+            elif method == "Cramer":
+                A = [row[:-1] for row in data]; b = [row[-1] for row in data]
+                n = len(A)
+                if any(len(row) != n for row in A):
+                    self.log.appendPlainText("Cramer requiere matriz cuadrada")
+                    self._update_result_panel("N/A", [], [], "DEPENDIENTE", None)
+                    return
+                detA, logA = operations_determinant.determinant_with_log(A)
+                if detA == 0:
+                    self.log.appendPlainText("Determinante de A es cero; Cramer no aplicable")
+                    self._update_result_panel("INDETERMINADO", [], list(range(1, n+1)), "DEPENDIENTE", None)
+                    return
+                sol = []
+                for i in range(n):
+                    Ai = [row[:] for row in A]
+                    for r in range(n):
+                        Ai[r][i] = b[r]
+                    detAi, _ = operations_determinant.determinant_with_log(Ai)
+                    sol.append(detAi / detA)
+                self.log.appendPlainText("Solución por Cramer:")
+                for i, val in enumerate(sol, start=1):
+                    self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
+                self._update_result_panel("ÚNICA", list(range(n)), [], "INDEPENDIENTE", sol)
             else:
-                self.log.appendPlainText("Sistema inconsistente")
-                self.log.appendPlainText("\n".join(result))
+                A = [row[:-1] for row in data]; b = [row[-1] for row in data]
+                n = len(A)
+                if n != 3 or any(len(row) != 3 for row in A):
+                    self.log.appendPlainText("Sarrus solo disponible para 3×3")
+                    self._update_result_panel("N/A", [], [], "DEPENDIENTE", None)
+                    return
+                detA, _ = operations_determinant.determinant_with_log(A)
+                if detA == 0:
+                    self.log.appendPlainText("Determinante de A es cero; Sarrus no aplicable")
+                    self._update_result_panel("INDETERMINADO", [], [1,2,3], "DEPENDIENTE", None)
+                    return
+                sol = []
+                for i in range(3):
+                    Ai = [row[:] for row in A]
+                    for r in range(3):
+                        Ai[r][i] = b[r]
+                    detAi, _ = operations_determinant.determinant_with_log(Ai)
+                    sol.append(detAi / detA)
+                self.log.appendPlainText("Solución por Sarrus/Cramer 3×3:")
+                for i, val in enumerate(sol, start=1):
+                    self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
+                self._update_result_panel("ÚNICA", [0,1,2], [], "INDEPENDIENTE", sol)
         except Exception as e:
             self.log.appendPlainText(f"Error: {e}")
 
     def clear(self):
         self.table.clear(); self.table.setRowCount(0); self.table.setColumnCount(0)
         self.log.clear()
+        self._update_result_panel("", [], [], "", None)
+
+    def open_equations_dialog(self):
+        dlg = QDialog(self); dlg.setWindowTitle("Introducir ecuaciones")
+        lay = QVBoxLayout(dlg)
+        info = QLabel("Introduce ecuaciones separadas por comas. Ej: 2x1+3x2+3x3=0, 3x1+4x2-x3=1, x3=10")
+        edit = QPlainTextEdit(); edit.setPlaceholderText("2x1+3x2+3x3=0, 3x1+4x2-x3=1, x3=10")
+        lay.addWidget(info); lay.addWidget(edit)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(bb)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        if dlg.exec():
+            text = edit.toPlainText().strip()
+            try:
+                A, b = self._parse_equations(text)
+                rows = len(A); cols = len(A[0])
+                self.spin_rows.setValue(rows); self.spin_cols.setValue(cols)
+                self.table.setRowCount(rows); self.table.setColumnCount(cols + 1)
+                for r in range(rows):
+                    for c in range(cols):
+                        self.table.setItem(r, c, QTableWidgetItem(str(float(A[r][c]))))
+                    self.table.setItem(r, cols, QTableWidgetItem(str(float(b[r]))))
+                self._set_headers(rows, cols)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def _parse_equations(self, text: str):
+        parts = [p.strip() for p in re.split(r"[\n,]+", text) if p.strip()]
+        terms = []
+        max_var = 0
+        for eq in parts:
+            if "=" not in eq:
+                raise ValueError("Ecuación sin '='")
+            left, right = eq.split("=", 1)
+            left = left.replace(" ", "")
+            pos = 0
+            coef_map = {}
+            while pos < len(left):
+                sign = 1
+                if left[pos] in "+-":
+                    sign = -1 if left[pos] == '-' else 1
+                    pos += 1
+                num = ''
+                while pos < len(left) and left[pos].isdigit():
+                    num += left[pos]; pos += 1
+                if pos >= len(left) or left[pos].lower() != 'x':
+                    raise ValueError("Se esperaba variable xk")
+                pos += 1
+                var_idx = ''
+                while pos < len(left) and left[pos].isdigit():
+                    var_idx += left[pos]; pos += 1
+                if not var_idx:
+                    raise ValueError("Índice de variable faltante")
+                k = int(var_idx)
+                max_var = max(max_var, k)
+                coef = Fraction(sign) * (parse_fraction(num) if num else Fraction(1))
+                coef_map[k] = coef_map.get(k, Fraction(0)) + coef
+            b = parse_fraction(right.strip())
+            terms.append((coef_map, b))
+        A = []
+        B = []
+        for coef_map, b in terms:
+            row = [Fraction(0)] * max_var
+            for k, v in coef_map.items():
+                if 1 <= k <= max_var:
+                    row[k-1] = v
+            A.append(row); B.append(b)
+        return A, B
+
+    def _set_headers(self, rows: int, cols: int):
+        self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols)), "b"])
+        self.table.setVerticalHeaderLabels([str(i+1) for i in range(rows)])
+
+    def _fmt_val(self, x) -> str:
+        try:
+            val = float(x)
+            s = f"{val:.6f}".rstrip('0').rstrip('.')
+            return s if s else "0"
+        except Exception:
+            return str(x)
+
+    def _format_matrix_lines(self, mat):
+        rows = []
+        for r in mat:
+            left = "  " + "  ".join(f"{self._fmt_val(v):>8}" for v in r[:-1])
+            right = self._fmt_val(r[-1])
+            rows.append(f"[{left} | {right:>8}]")
+        return "\n".join(rows)
+
+    def _update_result_panel(self, status, pivot_cols, free_vars, indep, sol):
+        self.res_status.setText(f"Estado: {status}" if status else "Estado: —")
+        piv_txt = ", ".join(str(p+1) for p in pivot_cols) if pivot_cols else "—"
+        self.res_pivots.setText(f"Columnas pivote: {piv_txt}")
+        free_txt = ", ".join(f"x{v}" for v in free_vars) if free_vars else "—"
+        self.res_free.setText(f"Variables libres: {free_txt}")
+        self.res_indep.setText(f"Columnas de A: {indep}" if indep else "Columnas de A: —")
+        n_vars = max(0, (self.table.columnCount() - 1))
+        if sol:
+            n_vars = max(n_vars, len(sol))
+        self.res_vars.setRowCount(n_vars)
+        for i in range(n_vars):
+            self.res_vars.setItem(i, 0, QTableWidgetItem(f"x{i+1}"))
+            val_text = "—"
+            if sol and i < len(sol):
+                val_text = self._fmt_val(sol[i])
+            else:
+                if status in ("INFINITAS", "INDETERMINADO") and (i+1) in free_vars:
+                    val_text = "Libre"
+                elif status == "INCONSISTENTE":
+                    val_text = "No aplica"
+            self.res_vars.setItem(i, 1, QTableWidgetItem(val_text))
 
 class RootFindingPage(QWidget):
     def __init__(self, colors, parent=None):
@@ -2119,8 +2461,8 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(MatricesPage(self.colors, self), "Matrices")
-        tabs.addTab(GaussJordanPage(self.colors, self), "Gauss-Jordan")
-        tabs.addTab(RootFindingPage(self.colors, self), "Raíces")
+        tabs.addTab(GaussJordanPage(self.colors, self), "Sistema de ecuaciones lineales")
+        tabs.addTab(RootFindingPage(self.colors, self), "Métodos numéricos")
 
         self.setCentralWidget(tabs)
 
