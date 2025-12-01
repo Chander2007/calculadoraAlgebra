@@ -1174,13 +1174,34 @@ class RootFindingPage(QWidget):
         main = QVBoxLayout(self); main.setContentsMargins(24, 24, 24, 24); main.setSpacing(16)
 
         left = QVBoxLayout(); left.setSpacing(12); left.setAlignment(Qt.AlignTop)
+        config_card = QFrame(); config_card.setObjectName("configCard")
+        config_card.setStyleSheet(
+            f"""
+            QFrame#configCard {{
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 14px;
+            }}
+            """
+        )
+        config_card.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        config_card.setFixedWidth(520)
+        card = QVBoxLayout(config_card); card.setContentsMargins(16,16,16,16); card.setSpacing(12)
+
         title = QLabel("Configuración")
         title.setStyleSheet(f"color:{self.colors['text']};")
         title.setFont(QtGui.QFont("Segoe UI", 18, QtGui.QFont.Bold))
-        left.addWidget(title)
+        card.addWidget(title)
+
+        lbl_prev = QLabel("Previsualización:"); lbl_prev.setStyleSheet(f"color:{self.colors['text']};")
+        card.addWidget(lbl_prev)
+        self.preview_fig = Figure(figsize=(3, 0.6), dpi=150)
+        self.preview_ax = self.preview_fig.add_subplot(111); self.preview_ax.axis("off")
+        self.preview_canvas = FigureCanvasQTAgg(self.preview_fig); self.preview_canvas.setFixedHeight(60)
+        card.addWidget(self.preview_canvas)
 
         self.func = QLineEdit(); self.func.setPlaceholderText("tan(x) - x")
-        left.addWidget(self.func)
+        card.addWidget(self.func)
 
         method_bar = QHBoxLayout()
         self.btn_bis = QPushButton("Bisección")
@@ -1195,10 +1216,13 @@ class RootFindingPage(QWidget):
         }
         for btn in self.method_buttons.values():
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumHeight(36)
-            btn.setStyleSheet(f"background:{self.colors['secondary_bg']}; color:{self.colors['text']}; border-radius:6px; padding:8px 12px;")
+            btn.setMinimumHeight(38)
+            btn.setFont(QtGui.QFont("Segoe UI", 12))
+            btn.setStyleSheet(
+                f"background: rgba(255,255,255,0.06); color:{self.colors['text']}; border-radius:10px; padding:10px 14px; border:1px solid rgba(255,255,255,0.10);"
+            )
             method_bar.addWidget(btn)
-        left.addLayout(method_bar)
+        card.addLayout(method_bar)
 
         grid = QGridLayout(); grid.setHorizontalSpacing(10); grid.setVerticalSpacing(6)
         for text in ("a / x₀:", "b / x₁:", "Tolerancia:", "Máx. iteraciones:"):
@@ -1208,7 +1232,7 @@ class RootFindingPage(QWidget):
         self.tol = QDoubleSpinBox(); self.tol.setRange(1e-12, 1.0); self.tol.setDecimals(10); self.tol.setValue(1e-4)
         self.max_iter = QSpinBox(); self.max_iter.setRange(1, 10000); self.max_iter.setValue(100)
         grid.addWidget(self.a, 0, 1); grid.addWidget(self.b, 0, 3); grid.addWidget(self.tol, 1, 1); grid.addWidget(self.max_iter, 1, 3)
-        left.addLayout(grid)
+        card.addLayout(grid)
 
         actions = QHBoxLayout()
         self.btn_calc = QPushButton("Calcular")
@@ -1218,58 +1242,64 @@ class RootFindingPage(QWidget):
         for btn in (self.btn_calc, self.btn_plot, self.btn_suggest, self.btn_clear):
             btn.setCursor(Qt.PointingHandCursor)
             actions.addWidget(btn)
-        left.addLayout(actions)
+        card.addLayout(actions)
 
         keypad = [
-            ("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"), ("ln(x)", "ln(x)"), ("log(x)", "log(x)"), ("sqrt(x)", "sqrt(x)"),
+            ("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"), ("ln(x)", "ln(x)"), ("log(x)", "log(x)"), ("√", "sqrt("),
             ("x²", "x^2"), ("x³", "x^3"), ("1/x", "1/x"), ("x", "x"), ("π", "pi"), ("e", "e"),
-            ("|x|", "abs(x)"), ("+", "+"), ("-", "-"), ("×", "*"), ("÷", "/"), ("(", "("),
-            (")", ")"), ("^", "^"), ("Borrar", "<DEL>")
+            ("|x|", "abs(x)"), ("+", "+"), ("-", "-"), ("×", "*"), ("÷", "/"), ("^", "^"),
+            ("Borrar", "<DEL>"), ("(", "("), (")", ")")
         ]
         grid_keys = QGridLayout(); grid_keys.setHorizontalSpacing(12); grid_keys.setVerticalSpacing(10)
         for idx, (text, value) in enumerate(keypad):
             btn = QPushButton(text)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumHeight(32)
-            btn.setStyleSheet(f"background:{self.colors['secondary_bg']}; color:{self.colors['text']}; border-radius:6px; padding:6px 10px;")
+            btn.setMinimumHeight(34)
+            btn.setFont(QtGui.QFont("Segoe UI", 12))
+            btn.setStyleSheet(
+                f"background: rgba(255,255,255,0.06); color:{self.colors['text']}; border-radius:12px; padding:8px 12px; border:1px solid rgba(255,255,255,0.10);"
+            )
             btn.clicked.connect(lambda _, v=value: self.insert_text(v))
             grid_keys.addWidget(btn, idx // 6, idx % 6)
-        left.addLayout(grid_keys)
+        card.addLayout(grid_keys)
+
+        left.addWidget(config_card)
 
         right = QVBoxLayout(); right.setSpacing(10)
-        lbl_prev = QLabel("Previsualización:"); lbl_prev.setStyleSheet(f"color:{self.colors['text']};")
-        right.addWidget(lbl_prev)
-        self.preview_fig = Figure(figsize=(3, 0.6), dpi=150)
-        self.preview_ax = self.preview_fig.add_subplot(111); self.preview_ax.axis("off")
-        self.preview_canvas = FigureCanvasQTAgg(self.preview_fig); self.preview_canvas.setFixedHeight(60)
-        right.addWidget(self.preview_canvas)
-
         self.figure = Figure(figsize=(7.2, 5.0), dpi=150)
         self.plot_ax = self.figure.add_subplot(111)
         self.canvas = FigureCanvasQTAgg(self.figure); self.canvas.setMinimumHeight(420)
         self.toolbar = NavigationToolbar2QT(self.canvas)
-        right.addWidget(self.toolbar); right.addWidget(self.canvas)
 
-        bottom = QVBoxLayout()
+        self.output_tabs = QTabWidget()
+        tab_graph = QWidget(); lay_graph = QVBoxLayout(tab_graph); lay_graph.setContentsMargins(0,0,0,0); lay_graph.setSpacing(6)
+        lay_graph.addWidget(self.toolbar); lay_graph.addWidget(self.canvas)
+        self.output_tabs.addTab(tab_graph, "Gráfica")
+
+        tab_results = QWidget(); lay_res = QVBoxLayout(tab_results); lay_res.setContentsMargins(0,0,0,0); lay_res.setSpacing(8)
         lbl_res = QLabel("Resultados"); lbl_res.setStyleSheet(f"color:{self.colors['text']};")
-        bottom.addWidget(lbl_res)
+        lay_res.addWidget(lbl_res)
         controls_res = QHBoxLayout(); controls_res.addStretch(1)
         controls_res.addWidget(QLabel("Tamaño texto:", parent=self)); self.slider_font = QSlider(Qt.Horizontal)
         self.slider_font.setRange(8, 16); self.slider_font.setValue(10)
-        controls_res.addWidget(self.slider_font); bottom.addLayout(controls_res)
+        controls_res.addWidget(self.slider_font); lay_res.addLayout(controls_res)
         self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(220); self.log.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.log.setFont(QtGui.QFont("Consolas", 10)); bottom.addWidget(self.log)
+        self.log.setFont(QtGui.QFont("Consolas", 10)); lay_res.addWidget(self.log)
+        self.output_tabs.addTab(tab_results, "Resultados")
+
+        right.addWidget(self.output_tabs)
 
         left_widget = QWidget(); left_widget.setLayout(left)
-        left_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        left_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        left_widget.setFixedWidth(520)
         layout_top = QHBoxLayout(); layout_top.setContentsMargins(0, 0, 0, 0)
         layout_top.addWidget(left_widget)
         layout_top.setAlignment(left_widget, Qt.AlignTop)
         layout_top.addLayout(right)
         layout_top.setStretch(0, 5)
         layout_top.setStretch(1, 7)
-        main.addLayout(layout_top); main.addLayout(bottom)
-        main.setStretch(0, 3); main.setStretch(1, 1)
+        main.addLayout(layout_top)
+        main.setStretch(0, 3)
 
         self.btn_bis.clicked.connect(lambda: self._set_method("Bisección"))
         self.btn_fp.clicked.connect(lambda: self._set_method("Falsa Posición"))
@@ -1742,9 +1772,13 @@ class RootFindingPage(QWidget):
         self.current_method = name
         for method, btn in self.method_buttons.items():
             if method == name:
-                btn.setStyleSheet(f"background:{self.colors['accent']}; color:black; border-radius:6px; padding:8px 12px; font-weight:bold;")
+                btn.setStyleSheet(
+                    f"background:{self.colors['accent']}; color:black; border-radius:10px; padding:10px 14px; font-weight:600; border:1px solid rgba(0,0,0,0.0);"
+                )
             else:
-                btn.setStyleSheet(f"background:{self.colors['secondary_bg']}; color:{self.colors['text']}; border-radius:6px; padding:8px 12px;")
+                btn.setStyleSheet(
+                    f"background: rgba(255,255,255,0.06); color:{self.colors['text']}; border-radius:10px; padding:10px 14px; border:1px solid rgba(255,255,255,0.10);"
+                )
         self.b.setEnabled(name != "Newton-Raphson")
 
     def insert_text(self, value):
@@ -1761,12 +1795,31 @@ class RootFindingPage(QWidget):
         func = self.func.text().strip()
         if func:
             latex = self._to_mathtext(func)
-            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=13, va="center")
+            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=12, va="center")
         self.preview_fig.tight_layout(); self.preview_canvas.draw_idle()
 
     def _to_mathtext(self, s: str) -> str:
-        expr = math_utils.format_function_display(s)
-        return self._normalize_exponents(expr)
+        try:
+            t = s
+            import re
+            # caso especial: 1/x - something -> \frac{1}{x - something}
+            t = re.sub(r"^\s*1\s*/\s*x\s*-\s*(.+)$", r"\\frac{1}{x-\1}", t)
+            # sqrt -> \sqrt{}
+            t = re.sub(r"sqrt\s*\(\s*([^()]*)\s*\)", r"\\sqrt{\1}", t)
+            # ln/log -> \ln{} / \log{}
+            t = re.sub(r"\bln\s*\(\s*([^()]*)\s*\)", r"\\ln{\1}", t)
+            t = re.sub(r"\blog\s*\(\s*([^()]*)\s*\)", r"\\log{\1}", t)
+            # exponentes: a^(b)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*\(\s*([^()]*)\s*\)", r"\1^{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*(-?[A-Za-z0-9\.]+)", r"\1^{\2}", t)
+            # fracciones comunes
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*([A-Za-z0-9\.]+)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"(?<![A-Za-z0-9_])([\-]?[A-Za-z0-9\.]+)\s*/\s*([\-]?[A-Za-z0-9\.]+)(?![A-Za-z0-9_])", r"\\frac{\1}{\2}", t)
+            return self._normalize_exponents(t)
+        except Exception:
+            return self._normalize_exponents(s)
 
     def _normalize_exponents(self, expr: str) -> str:
         out = []
@@ -1805,6 +1858,8 @@ class RootFindingPage(QWidget):
                     out.append(expr[i:start])
                     out.append("}")
                     i = start
+            elif ch == "^" and i + 1 >= n:
+                i += 1
             else:
                 out.append(ch)
                 i += 1
@@ -2062,12 +2117,26 @@ class RootFindingPage(QWidget):
         func = self.func.text().strip()
         if func:
             latex = self._to_mathtext(func)
-            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=13, va="center")
+            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=12, va="center")
         self.preview_fig.tight_layout(); self.preview_canvas.draw_idle()
 
     def _to_mathtext(self, s: str) -> str:
-        expr = math_utils.format_function_display(s)
-        return self._normalize_exponents(expr)
+        try:
+            t = s
+            import re
+            t = re.sub(r"^\s*1\s*/\s*x\s*-\s*(.+)$", r"\\frac{1}{x-\1}", t)
+            t = re.sub(r"sqrt\s*\(\s*([^()]*)\s*\)", r"\\sqrt{\1}", t)
+            t = re.sub(r"\bln\s*\(\s*([^()]*)\s*\)", r"\\ln{\1}", t)
+            t = re.sub(r"\blog\s*\(\s*([^()]*)\s*\)", r"\\log{\1}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*\(\s*([^()]*)\s*\)", r"\1^{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*(-?[A-Za-z0-9\.]+)", r"\1^{\2}", t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*([A-Za-z0-9\.]+)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"(?<![A-Za-z0-9_])([\-]?[A-Za-z0-9\.]+)\s*/\s*([\-]?[A-Za-z0-9\.]+)(?![A-Za-z0-9_])", r"\\frac{\1}{\2}", t)
+            return self._normalize_exponents(t)
+        except Exception:
+            return self._normalize_exponents(s)
 
     def _normalize_exponents(self, expr: str) -> str:
         out = []
@@ -2082,7 +2151,11 @@ class RootFindingPage(QWidget):
         }
         while i < n:
             ch = expr[i]
-            if ch == "^" and i + 1 < n:
+            if ch == "^":
+                # incompleto al final: ignorar
+                if i + 1 >= n:
+                    i += 1
+                    continue
                 i += 1
                 if expr[i] == "(":
                     depth = 1
@@ -2098,14 +2171,22 @@ class RootFindingPage(QWidget):
                     out.append(expr[start:j - 1])
                     out.append("}")
                     i = j
+                    continue
+                # leer token con signo opcional
+                start = i
+                if expr[start] == "-":
+                    start += 1
+                end = start
+                while end < n and (expr[end].isalnum() or expr[end] in "._πe"):
+                    end += 1
+                # si no hay token válido, omitir '^'
+                if end == i or (expr[i] == '-' and end == i + 1):
+                    out.append("")
                 else:
-                    start = i
-                    while start < n and (expr[start].isalnum() or expr[start] in "._πe"):
-                        start += 1
                     out.append("^{")
-                    out.append(expr[i:start])
+                    out.append(expr[i:end])
                     out.append("}")
-                    i = start
+                i = end
             else:
                 out.append(ch)
                 i += 1
@@ -2363,29 +2444,46 @@ class RootFindingPage(QWidget):
         func = self.func.text().strip()
         if func:
             latex = self._to_mathtext(func)
-            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=13, va="center")
+            self.preview_ax.text(0.02, 0.5, f"$f(x) = {latex}$", fontsize=12, va="center")
         self.preview_fig.tight_layout(); self.preview_canvas.draw_idle()
 
     def _to_mathtext(self, s: str) -> str:
-        expr = math_utils.format_function_display(s)
-        return self._normalize_exponents(expr)
+        try:
+            t = s
+            import re
+            t = re.sub(r"^\s*1\s*/\s*x\s*-\s*(.+)$", r"\\frac{1}{x-\1}", t)
+            t = re.sub(r"sqrt\s*\(\s*([^()]*)\s*\)", r"\\sqrt{\1}", t)
+            t = re.sub(r"\bln\s*\(\s*([^()]*)\s*\)", r"\\ln{\1}", t)
+            t = re.sub(r"\blog\s*\(\s*([^()]*)\s*\)", r"\\log{\1}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*\(\s*([^()]*)\s*\)", r"\1^{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*\^\s*(-?[A-Za-z0-9\.]+)", r"\1^{\2}", t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"([A-Za-z0-9\.]+)\s*/\s*\(\s*([^()]*)\s*\)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"\(\s*([^()]*)\s*\)\s*/\s*([A-Za-z0-9\.]+)", r"\\frac{\1}{\2}", t)
+            t = re.sub(r"(?<![A-Za-z0-9_])([\-]?[A-Za-z0-9\.]+)\s*/\s*([\-]?[A-Za-z0-9\.]+)(?![A-Za-z0-9_])", r"\\frac{\1}{\2}", t)
+            return self._normalize_exponents(t)
+        except Exception:
+            return self._normalize_exponents(s)
 
     def _normalize_exponents(self, expr: str) -> str:
         out = []
         i = 0
         n = len(expr)
-        special_tokens = {
-            "x²": "x^(2)",
-            "x³": "x^(3)",
-            "^": "^(",
-            "e": "e",
-            "e^x": "e^(",
-        }
         while i < n:
             ch = expr[i]
-            if ch == "^" and i + 1 < n:
+            if ch == "^":
+                # si es el último carácter, ignorar para evitar errores
+                if i + 1 >= n:
+                    i += 1
+                    continue
+                # si ya viene en formato LaTeX ^{...}, no tocar
+                if expr[i + 1] == "{":
+                    out.append("^")
+                    i += 1
+                    continue
                 i += 1
                 if expr[i] == "(":
+                    # convertir ^(expr) -> ^{expr}
                     depth = 1
                     start = i + 1
                     j = start
@@ -2400,13 +2498,21 @@ class RootFindingPage(QWidget):
                     out.append("}")
                     i = j
                 else:
+                    # token simple con signo opcional
                     start = i
-                    while start < n and (expr[start].isalnum() or expr[start] in "._πe"):
+                    if expr[start] == "-":
                         start += 1
-                    out.append("^{")
-                    out.append(expr[i:start])
-                    out.append("}")
-                    i = start
+                    end = start
+                    while end < n and (expr[end].isalnum() or expr[end] in "._πe"):
+                        end += 1
+                    if end == i or (expr[i] == '-' and end == i + 1):
+                        # sin token válido, omitir '^'
+                        pass
+                    else:
+                        out.append("^{")
+                        out.append(expr[i:end])
+                        out.append("}")
+                    i = end
             else:
                 out.append(ch)
                 i += 1
