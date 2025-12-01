@@ -543,14 +543,18 @@ class MatricesPage(QWidget):
                 raise ValueError("Se esperaba A o B")
             var = tokens[idx]; idx += 1
             base = A if var == 'A' else B
-            # pasos por celda de escalado
             rows, cols = base.shape
-            partial = clone_zero(rows, cols)
+            partial = Matrix([[base[i, j] for j in range(cols)] for i in range(rows)])
             for i in range(rows):
                 for j in range(cols):
-                    partial[i, j] = base[i, j] * coef
-                    self._add_step_panel(f"Paso {self._next_step}", f"({var})[{i+1},{j+1}] * {self._fmt(coef)} = {self._fmt(partial[i,j])}", partial)
-                    self._next_step += 1
+                    old = partial[i, j]
+                    new = base[i, j] * coef
+                    partial[i, j] = new
+                    self._add_step_panel(
+                        f"Paso {self._next_step}",
+                        f"c[{i+1},{j+1}] = ({var})[{i+1},{j+1}] · {self._fmt(coef)} = {self._fmt(new)}",
+                        partial
+                    ); self._next_step += 1
             scaled = partial
             return scaled, idx
         def read_term(idx):
@@ -558,20 +562,24 @@ class MatricesPage(QWidget):
             while idx < len(tokens) and tokens[idx] == '*':
                 idx += 1
                 right, idx = read_factor(idx)
-                # multiplicación por celda
                 rowsA, colsA = mat.shape; rowsB, colsB = right.shape
                 if colsA != rowsB:
                     raise ValueError("Dimensiones no compatibles para multiplicación")
                 res = clone_zero(rowsA, colsB)
                 for i in range(rowsA):
                     for j in range(colsB):
-                        s = Fraction(0); terms = []
+                        terms = []
+                        s = Fraction(0)
                         for k in range(colsA):
                             prod = mat[i, k] * right[k, j]
-                            s += prod; terms.append(f"{self._fmt(mat[i,k])}·{self._fmt(right[k,j])}")
+                            s += prod
+                            terms.append(f"{self._fmt(mat[i,k])}×{self._fmt(right[k,j])}")
                         res[i, j] = s
-                        self._add_step_panel(f"Paso {self._next_step}", f"res[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}", res)
-                        self._next_step += 1
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"c[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}",
+                            res
+                        ); self._next_step += 1
                 mat = res
             return mat, idx
         # suma/resta con prioridad
@@ -588,22 +596,29 @@ class MatricesPage(QWidget):
                 rows, cols = term.shape
                 for r in range(rows):
                     for c in range(cols):
-                        term[r, c] = term[r, c] * Fraction(-1)
-                        self._add_step_panel(f"Paso {self._next_step}", f"Cambiar signo término[{r+1},{c+1}]", term)
-                        self._next_step += 1
+                        old = term[r, c]
+                        new = old * Fraction(-1)
+                        term[r, c] = new
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"c[{r+1},{c+1}] = (−1)×{self._fmt(old)} = {self._fmt(new)}",
+                            term
+                        ); self._next_step += 1
             prev = result
             result = term if result is None else self._matrix_add(result, term)
-            if prev is None:
-                self._add_step_panel(f"Paso {self._next_step}", "Iniciar acumulado", result); self._next_step += 1
-            else:
-                # suma por celda
+            if prev is not None:
                 rows, cols = result.shape
                 for r in range(rows):
                     for c in range(cols):
-                        val = prev[r, c] + term[r, c]
+                        old = prev[r, c]
+                        add = term[r, c]
+                        val = old + add
                         prev[r, c] = val
-                        self._add_step_panel(f"Paso {self._next_step}", f"acum[{r+1},{c+1}] = {self._fmt(prev[r,c]-term[r,c])} + {self._fmt(term[r,c])} = {self._fmt(val)}", prev)
-                        self._next_step += 1
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"acum[{r+1},{c+1}] = {self._fmt(old)} + {self._fmt(add)} = {self._fmt(val)}",
+                            prev
+                        ); self._next_step += 1
                 result = prev
         return result
 
@@ -629,64 +644,58 @@ class MatricesPage(QWidget):
             adv = self.adv_op.currentText()
             base = matA
             if basic == "Suma":
-                res = Matrix([[Fraction(0) for _ in range(matA.cols)] for _ in range(matA.rows)])
+                res = Matrix([[matA[i, j] for j in range(matA.cols)] for i in range(matA.rows)])
                 for i in range(matA.rows):
-                    self._add_step_panel(f"Paso {self._next_step} — Fila {i+1}", f"Procesar fila {i+1}", res); self._next_step += 1
                     for j in range(matA.cols):
-                        res[i, j] = matA[i, j] + matB[i, j]
+                        old = res[i, j]
+                        val = matA[i, j] + matB[i, j]
+                        res[i, j] = val
                         self._add_step_panel(
                             f"Paso {self._next_step}",
-                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] + B[{i+1},{j+1}] = {self._fmt(matA[i,j])} + {self._fmt(matB[i,j])} = {self._fmt(res[i,j])}",
+                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] + B[{i+1},{j+1}] = {self._fmt(val)}",
                             res
                         ); self._next_step += 1
-                    fila_txt = ", ".join(self._fmt(res[i, c]) for c in range(matA.cols))
-                    self._add_step_panel(f"Paso {self._next_step}", f"Resultado fila {i+1}: [{fila_txt}]", res); self._next_step += 1
             elif basic == "Resta":
-                res = Matrix([[Fraction(0) for _ in range(matA.cols)] for _ in range(matA.rows)])
+                res = Matrix([[matA[i, j] for j in range(matA.cols)] for i in range(matA.rows)])
                 for i in range(matA.rows):
-                    self._add_step_panel(f"Paso {self._next_step} — Fila {i+1}", f"Procesar fila {i+1}", res); self._next_step += 1
                     for j in range(matA.cols):
-                        res[i, j] = matA[i, j] - matB[i, j]
+                        old = res[i, j]
+                        val = matA[i, j] - matB[i, j]
+                        res[i, j] = val
                         self._add_step_panel(
                             f"Paso {self._next_step}",
-                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] − B[{i+1},{j+1}] = {self._fmt(matA[i,j])} − {self._fmt(matB[i,j])} = {self._fmt(res[i,j])}",
+                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] − B[{i+1},{j+1}] = {self._fmt(val)}",
                             res
                         ); self._next_step += 1
-                    fila_txt = ", ".join(self._fmt(res[i, c]) for c in range(matA.cols))
-                    self._add_step_panel(f"Paso {self._next_step}", f"Resultado fila {i+1}: [{fila_txt}]", res); self._next_step += 1
             elif basic == "Multiplicación":
                 res = Matrix([[Fraction(0) for _ in range(matB.cols)] for _ in range(matA.rows)])
                 for i in range(matA.rows):
                     for j in range(matB.cols):
-                        s = Fraction(0)
-                        self._add_step_panel(
-                            f"Paso {self._next_step}",
-                            f"Inicializar C[{i+1},{j+1}] = 0",
-                            res
-                        ); self._next_step += 1
                         terms = []
+                        s = Fraction(0)
                         for k in range(matA.cols):
                             prod = matA[i, k] * matB[k, j]
                             s += prod
-                            res[i, j] = s
-                            self._add_step_panel(
-                                f"Paso {self._next_step}",
-                                f"C[{i+1},{j+1}] += A[{i+1},{k+1}] × B[{k+1},{j+1}] = {self._fmt(matA[i,k])} × {self._fmt(matB[k,j])} → {self._fmt(s)}",
-                                res
-                            ); self._next_step += 1
                             terms.append(f"{self._fmt(matA[i,k])}×{self._fmt(matB[k,j])}")
+                        res[i, j] = s
                         self._add_step_panel(
                             f"Paso {self._next_step}",
-                            f"res[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}",
+                            f"c[{i+1},{j+1}] = " + " + ".join(terms) + f" = {self._fmt(s)}",
                             res
                         ); self._next_step += 1
             elif basic == "Escalar":
                 k = parse_fraction(self.scalar_input.text() or "1")
-                res = Matrix([[Fraction(0) for _ in range(base.cols)] for _ in range(base.rows)])
+                res = Matrix([[base[i, j] for j in range(base.cols)] for i in range(base.rows)])
                 for i in range(base.rows):
                     for j in range(base.cols):
-                        res[i, j] = base[i, j] * k
-                        self._add_step_panel(f"Paso {self._next_step}", f"A[{i+1},{j+1}] · {self._fmt(k)} = {self._fmt(res[i,j])}", res); self._next_step += 1
+                        old = res[i, j]
+                        val = base[i, j] * k
+                        res[i, j] = val
+                        self._add_step_panel(
+                            f"Paso {self._next_step}",
+                            f"c[{i+1},{j+1}] = A[{i+1},{j+1}] · {self._fmt(k)} = {self._fmt(val)}",
+                            res
+                        ); self._next_step += 1
             else:
                 res = base
             # Operaciones avanzadas
