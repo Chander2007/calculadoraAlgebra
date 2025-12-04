@@ -1,6 +1,6 @@
 import sys
 from PySide6 import QtGui
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox, QDialog, QDialogButtonBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox, QDialog, QDialogButtonBox, QMenu
 from PySide6.QtCore import Qt
 from fractions import Fraction
 import math
@@ -142,8 +142,18 @@ class MatricesPage(QWidget):
         # Operaciones: barra superior (crear antes de usar en toolbar)
         self.basic_op = QComboBox(); self.basic_op.addItems(["Expresión", "Suma", "Resta", "Multiplicación", "Escalar"])
         self.basic_op.setFixedWidth(160); self.basic_op.setCursor(Qt.PointingHandCursor); self.basic_op.setStyleSheet(combo_style)
-        self.adv_op = QComboBox(); self.adv_op.addItems(["Ninguna", "Transpuesta", "Inversa", "Diagonal Superior", "Diagonal Inferior", "Determinante", "Cofactor"])
+        self.adv_op = QComboBox(); self.adv_op.addItems(["Ninguna", "Transpuesta", "Inversa", "Diagonal Superior", "Diagonal Inferior", "Determinante", "Cofactor", "Independencia lineal", "Sistema de ecuaciones"])
         self.adv_op.setFixedWidth(170); self.adv_op.setCursor(Qt.PointingHandCursor); self.adv_op.setStyleSheet(combo_style)
+        self.adv_target = 'A'
+        self.btn_target = QPushButton("Operar sobre: A")
+        self.btn_target.setCursor(Qt.PointingHandCursor)
+        self.btn_target.setFixedHeight(36)
+        target_menu = QMenu(self.btn_target)
+        actA = target_menu.addAction("A"); actB = target_menu.addAction("B"); actAB = target_menu.addAction("AB")
+        actA.triggered.connect(lambda: self._set_adv_target('A'))
+        actB.triggered.connect(lambda: self._set_adv_target('B'))
+        actAB.triggered.connect(lambda: self._set_adv_target('AB'))
+        self.btn_target.setMenu(target_menu)
         self.scalar_input = QLineEdit(); self.scalar_input.setPlaceholderText("k"); self.scalar_input.setFixedWidth(70); self.scalar_input.setStyleSheet(line_style)
         self.scalar_input.hide()
 
@@ -153,7 +163,8 @@ class MatricesPage(QWidget):
         toolbar.addWidget(self.basic_op, 0, 1)
         toolbar.addWidget(QLabel("Avanzadas:"), 0, 2)
         toolbar.addWidget(self.adv_op, 0, 3)
-        toolbar.addWidget(self.scalar_input, 0, 4)
+        toolbar.addWidget(self.btn_target, 0, 4)
+        toolbar.addWidget(self.scalar_input, 0, 5)
         # Fila 2: Expresión y Vista exactamente debajo de sus columnas
         lbl_operation = QLabel("Expresión:"); lbl_operation.setStyleSheet(f"color:{self.colors['text_secondary']}; font-weight:600;")
         toolbar.addWidget(lbl_operation, 1, 0)
@@ -180,6 +191,8 @@ class MatricesPage(QWidget):
         self.btn_generate.clicked.connect(self.generate_tables)
         self.btn_clear.clicked.connect(self.clear_all)
         self.btn_solve.clicked.connect(self.solve_expression)
+        self.adv_op.currentTextChanged.connect(lambda _: self._update_adv_target_enabled())
+        self._update_adv_target_enabled()
 
         self.spin_rows.valueChanged.connect(lambda _: self.generate_tables())
         self.spin_colsA.valueChanged.connect(lambda _: self.generate_tables())
@@ -363,9 +376,39 @@ class MatricesPage(QWidget):
         return Matrix(data)
 
     def _update_matrix_visibility(self):
-        show_b = self.adv_op.currentText() == "Ninguna"
         if hasattr(self, 'containerB'):
-            self.containerB.setVisible(show_b)
+            self.containerB.setVisible(True)
+
+    def _update_adv_target_enabled(self):
+        self.btn_target.setEnabled(self.adv_op.currentText() != "Sistema de ecuaciones")
+        self.btn_target.setVisible(self.adv_op.currentText() != "Ninguna")
+
+    def _set_adv_target(self, t):
+        self.adv_target = t
+        self.btn_target.setText(f"Operar sobre: {t}")
+
+    def open_select_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Seleccionar matrices")
+        lay = QVBoxLayout(dlg)
+        from PySide6.QtWidgets import QFormLayout
+        form = QFormLayout()
+        s_rowsA = QSpinBox(); s_rowsA.setRange(1, 10); s_rowsA.setValue(self.spin_rows.value())
+        s_colsA = QSpinBox(); s_colsA.setRange(1, 10); s_colsA.setValue(self.spin_colsA.value())
+        s_rowsB = QSpinBox(); s_rowsB.setRange(1, 10); s_rowsB.setValue(self.spin_rowsB.value())
+        s_colsB = QSpinBox(); s_colsB.setRange(1, 10); s_colsB.setValue(self.spin_colsB.value())
+        form.addRow("Filas A", s_rowsA); form.addRow("Columnas A", s_colsA)
+        form.addRow("Filas B", s_rowsB); form.addRow("Columnas B", s_colsB)
+        lay.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject)
+        if dlg.exec():
+            self.spin_rows.setValue(s_rowsA.value())
+            self.spin_colsA.setValue(s_colsA.value())
+            self.spin_rowsB.setValue(s_rowsB.value())
+            self.spin_colsB.setValue(s_colsB.value())
+            self.generate_tables()
 
     def _matrix_scale(self, mat: Matrix, k: Fraction) -> Matrix:
         rows, cols = mat.shape
@@ -490,11 +533,38 @@ class MatricesPage(QWidget):
             data.append(row)
         return Matrix(data)
 
-    def _upper(self, M: Matrix) -> Matrix:
-        return Matrix([[M[i, j] if i <= j else Fraction(0) for j in range(M.cols)] for i in range(M.rows)])
+        def _upper(self, M: Matrix) -> Matrix:
+            return Matrix([[M[i, j] if i <= j else Fraction(0) for j in range(M.cols)] for i in range(M.rows)])
 
-    def _lower(self, M: Matrix) -> Matrix:
-        return Matrix([[M[i, j] if i >= j else Fraction(0) for j in range(M.cols)] for i in range(M.rows)])
+        def _lower(self, M: Matrix) -> Matrix:
+            return Matrix([[M[i, j] if i >= j else Fraction(0) for j in range(M.cols)] for i in range(M.rows)])
+
+    def _linear_independence(self, M: Matrix) -> tuple:
+        sm = self._to_sympy(M)
+        rank = int(sm.rank())
+        cols = M.cols
+        indep = rank == cols
+        return indep, rank, cols
+
+    def _system_solve(self, A: Matrix, B: Matrix):
+        if B.cols != 1 or B.rows != A.rows:
+            raise ValueError("Para sistema: B debe ser vector columna con filas de A")
+        sA = self._to_sympy(A); sB = self._to_sympy(B)
+        aug = sA.row_join(sB)
+        rref, pivots = aug.rref()
+        # construir matriz solución si existe solución única
+        sol = None
+        if len(pivots) == A.cols and all(aug.rank() == sA.rank() for _ in [0]):
+            sol_vec = rref[:, -1]
+            data = []
+            for i in range(sol_vec.rows):
+                val = sol_vec[i, 0]
+                if getattr(val, 'is_Rational', False):
+                    data.append([Fraction(int(val.p), int(val.q))])
+                else:
+                    data.append([Fraction.from_float(float(val))])
+            sol = Matrix(data)
+        return rref, sol
 
     def _set_final(self, mat: Matrix):
         from PySide6.QtWidgets import QGroupBox
@@ -700,20 +770,38 @@ class MatricesPage(QWidget):
                 res = base
             # Operaciones avanzadas
             if adv == "Transpuesta":
-                res = self._transpose(res); self._add_step_panel(f"Paso {self._next_step}", "Transponer matriz (res^T)", res); self._next_step += 1
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                res = self._transpose(base2); self._add_step_panel(f"Paso {self._next_step}", f"Transponer {self.adv_target}", res); self._next_step += 1
             elif adv == "Inversa":
-                res = self._inverse(res); self._add_step_panel(f"Paso {self._next_step}", "Calcular inversa (res^{-1})", res); self._next_step += 1
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                res = self._inverse(base2); self._add_step_panel(f"Paso {self._next_step}", f"Inversa de {self.adv_target}", res); self._next_step += 1
             elif adv == "Diagonal Superior":
-                res = self._upper(res); self._add_step_panel(f"Paso {self._next_step}", "Tomar triangular superior", res); self._next_step += 1
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                res = self._upper(base2); self._add_step_panel(f"Paso {self._next_step}", f"Triangular superior de {self.adv_target}", res); self._next_step += 1
             elif adv == "Diagonal Inferior":
-                res = self._lower(res); self._add_step_panel(f"Paso {self._next_step}", "Tomar triangular inferior", res); self._next_step += 1
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                res = self._lower(base2); self._add_step_panel(f"Paso {self._next_step}", f"Triangular inferior de {self.adv_target}", res); self._next_step += 1
             elif adv == "Determinante":
-                det, _logs = operations_determinant.determinant_with_log(matA.data)
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                det, _logs = operations_determinant.determinant_with_log(base2.data)
                 res = Matrix([[det]])
-                self._add_step_panel(f"Paso {self._next_step}", "Determinante de A", res); self._next_step += 1
+                self._add_step_panel(f"Paso {self._next_step}", f"Determinante de {self.adv_target}", res); self._next_step += 1
             elif adv == "Cofactor":
-                res, _logs = operations_cofactor.cofactor_matrix(matA)
-                self._add_step_panel(f"Paso {self._next_step}", "Matriz de cofactores de A", res); self._next_step += 1
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                res, _logs = operations_cofactor.cofactor_matrix(base2)
+                self._add_step_panel(f"Paso {self._next_step}", f"Matriz de cofactores de {self.adv_target}", res); self._next_step += 1
+            elif adv == "Independencia lineal":
+                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
+                indep, rank, cols = self._linear_independence(base2)
+                msg = f"Rango({self.adv_target}) = {rank}; columnas = {cols} → " + ("independientes" if indep else "dependientes")
+                self._add_step_panel(f"Paso {self._next_step}", msg, base2); self._next_step += 1
+            elif adv == "Sistema de ecuaciones":
+                rref, sol = self._system_solve(matA, matB)
+                # Mostrar RREF del aumentado y solución si disponible
+                m_rref = Matrix([[Fraction(int(rref[i,j].p), int(rref[i,j].q)) if getattr(rref[i,j],'is_Rational',False) else Fraction.from_float(float(rref[i,j])) for j in range(rref.cols)] for i in range(rref.rows)])
+                self._add_step_panel(f"Paso {self._next_step}", "RREF del aumentado [A|B]", m_rref); self._next_step += 1
+                if sol is not None:
+                    self._add_step_panel(f"Paso {self._next_step}", "Solución única", sol); self._next_step += 1
             self._set_final(res)
             self.inner_tabs.setCurrentIndex(1)
         except Exception as e:
@@ -1056,16 +1144,38 @@ class GaussJordanPage(QWidget):
     def open_equations_dialog(self):
         dlg = QDialog(self); dlg.setWindowTitle("Introducir ecuaciones")
         lay = QVBoxLayout(dlg)
-        info = QLabel("Introduce ecuaciones separadas por comas. Ej: 2x1+3x2+3x3=0, 3x1+4x2-x3=1, x3=10")
-        edit = QPlainTextEdit(); edit.setPlaceholderText("2x1+3x2+3x3=0, 3x1+4x2-x3=1, x3=10")
+        info = QLabel("Puedes usar variables x1,x2,… o x,y,z,w.\nEjemplos: 2x+3y-z=4, x1-x2+x3=0")
+        edit = QPlainTextEdit(); edit.setPlaceholderText("2x+3y-z=4, x1-x2+x3=0")
         lay.addWidget(info); lay.addWidget(edit)
+        info2 = QLabel("Expresión de la matriz de coeficientes (opcional): I, A, I-A, Ax")
+        expr_input = QLineEdit(); expr_input.setPlaceholderText("Ej.: (I-A) o Ax")
+        lay.addWidget(info2); lay.addWidget(expr_input)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         lay.addWidget(bb)
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
         if dlg.exec():
             text = edit.toPlainText().strip()
+            exprA = expr_input.text().strip()
             try:
-                A, b = self._parse_equations(text)
+                if text:
+                    A, b = self._parse_equations(text)
+                else:
+                    # si no hay ecuaciones, usar tabla actual como base
+                    rows = self.spin_rows.value(); cols = self.spin_cols.value()
+                    A = []
+                    for r in range(rows):
+                        row = []
+                        for c in range(cols):
+                            item = self.table.item(r, c)
+                            val = parse_fraction(item.text() if item else "0")
+                            row.append(val)
+                        A.append(row)
+                    b = [Fraction(0) for _ in range(rows)]
+
+                # aplicar expresión de coeficientes si se proporcionó
+                if exprA:
+                    A = self._apply_coeff_expression(A, exprA)
+
                 rows = len(A); cols = len(A[0])
                 self.spin_rows.setValue(rows); self.spin_cols.setValue(cols)
                 self.table.setRowCount(rows); self.table.setColumnCount(cols + 1)
@@ -1080,31 +1190,53 @@ class GaussJordanPage(QWidget):
     def _parse_equations(self, text: str):
         parts = [p.strip() for p in re.split(r"[\n,]+", text) if p.strip()]
         terms = []
+        var_to_idx = {}
+        order_letters = ['x', 'y', 'z', 'w']
+        next_idx = 1
+        def get_index(token_letters: str, token_digits: str) -> int:
+            nonlocal next_idx
+            if token_letters.lower() == 'x' and token_digits:
+                return int(token_digits)
+            name = token_letters.lower() + token_digits
+            if name in var_to_idx:
+                return var_to_idx[name]
+            if token_digits:
+                # general nombre con índice explícito (p.ej. y2)
+                idx = int(token_digits)
+            else:
+                if token_letters.lower() in order_letters:
+                    idx = order_letters.index(token_letters.lower()) + 1
+                else:
+                    idx = next_idx
+            var_to_idx[name] = idx
+            next_idx = max(next_idx, idx + 1)
+            return idx
+
         max_var = 0
         for eq in parts:
-            if "=" not in eq:
+            if '=' not in eq:
                 raise ValueError("Ecuación sin '='")
-            left, right = eq.split("=", 1)
-            left = left.replace(" ", "")
+            left, right = eq.split('=', 1)
+            left = left.replace(' ', '')
             pos = 0
             coef_map = {}
             while pos < len(left):
                 sign = 1
-                if left[pos] in "+-":
+                if left[pos] in '+-':
                     sign = -1 if left[pos] == '-' else 1
                     pos += 1
                 num = ''
-                while pos < len(left) and left[pos].isdigit():
+                while pos < len(left) and (left[pos].isdigit() or left[pos] in './eE'):
                     num += left[pos]; pos += 1
-                if pos >= len(left) or left[pos].lower() != 'x':
-                    raise ValueError("Se esperaba variable xk")
-                pos += 1
-                var_idx = ''
+                if pos >= len(left) or not left[pos].isalpha():
+                    raise ValueError("Se esperaba variable")
+                letters = ''
+                while pos < len(left) and left[pos].isalpha():
+                    letters += left[pos]; pos += 1
+                digits = ''
                 while pos < len(left) and left[pos].isdigit():
-                    var_idx += left[pos]; pos += 1
-                if not var_idx:
-                    raise ValueError("Índice de variable faltante")
-                k = int(var_idx)
+                    digits += left[pos]; pos += 1
+                k = get_index(letters, digits)
                 max_var = max(max_var, k)
                 coef = Fraction(sign) * (parse_fraction(num) if num else Fraction(1))
                 coef_map[k] = coef_map.get(k, Fraction(0)) + coef
@@ -1119,6 +1251,21 @@ class GaussJordanPage(QWidget):
                     row[k-1] = v
             A.append(row); B.append(b)
         return A, B
+
+    def _apply_coeff_expression(self, A_list, expr: str):
+        rows = len(A_list); cols = len(A_list[0]) if rows else 0
+        # construir identidad del tamaño adecuado
+        I = [[Fraction(1 if i == j else 0) for j in range(cols)] for i in range(rows)]
+        expr_norm = expr.replace(' ', '').lower()
+        if expr_norm in ('a', '(a)', 'ax', 'a*x'):
+            return A_list
+        if expr_norm in ('i', '(i)'):
+            return I
+        if expr_norm in ('i-a', '(i-a)'):
+            res = [[I[i][j] - A_list[i][j] for j in range(cols)] for i in range(rows)]
+            return res
+        # si no coincide, devolver A sin cambios
+        return A_list
 
     def _set_headers(self, rows: int, cols: int):
         self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols)), "b"])
@@ -1264,6 +1411,24 @@ class RootFindingPage(QWidget):
         card.addLayout(grid_keys)
 
         left.addWidget(config_card)
+
+        suggest_card = QFrame(); suggest_card.setObjectName("suggestCard")
+        suggest_card.setStyleSheet(
+            f"""
+            QFrame#suggestCard {{
+                background: rgba(255,255,255,0.03);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 12px;
+            }}
+            """
+        )
+        lay_sug = QVBoxLayout(suggest_card); lay_sug.setContentsMargins(12,12,12,12); lay_sug.setSpacing(6)
+        lbl_sug = QLabel("Sugerencias de intervalos"); lbl_sug.setStyleSheet(f"color:{self.colors['text_secondary']}; font-weight:600;")
+        lay_sug.addWidget(lbl_sug)
+        self.suggest_log = QPlainTextEdit(); self.suggest_log.setReadOnly(True); self.suggest_log.setMinimumHeight(100)
+        self.suggest_log.setStyleSheet(f"color:{self.colors['text']}; background:{self.colors['secondary_bg']}; border-radius:8px;")
+        lay_sug.addWidget(self.suggest_log)
+        left.addWidget(suggest_card)
 
         right = QVBoxLayout(); right.setSpacing(10)
         self.figure = Figure(figsize=(7.2, 5.0), dpi=150)
@@ -1887,11 +2052,13 @@ class RootFindingPage(QWidget):
     def suggest_interval(self):
         func = self.func.text().strip()
         if not func:
-            self.log.appendPlainText("Ingresa una función para sugerir intervalos.")
+            if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+                self.suggest_log.clear(); self.suggest_log.appendPlainText("Ingresa una función para sugerir intervalos.")
             return
         res = self._suggest_interval_core(func)
         if res is None:
-            self.log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
+            if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+                self.suggest_log.clear(); self.suggest_log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
             return
         a, b, intervals, zeros = res
         self.a.setValue(a); self.b.setValue(b)
@@ -1902,7 +2069,9 @@ class RootFindingPage(QWidget):
             report.append(""); report.append("Posibles raíces exactas:")
             for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0]))):
                 report.append(f"{idx+1}. {zx:.6f} (paso {step:.1e})")
-        self.log.appendPlainText("\n".join(report))
+        text = "\n".join(report)
+        if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+            self.suggest_log.clear(); self.suggest_log.appendPlainText(text)
 
     def _clear(self):
         self.func.clear()
@@ -2214,11 +2383,13 @@ class RootFindingPage(QWidget):
     def suggest_interval(self):
         func = self.func.text().strip()
         if not func:
-            self.log.appendPlainText("Ingresa una función para sugerir intervalos.")
+            if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+                self.suggest_log.clear(); self.suggest_log.appendPlainText("Ingresa una función para sugerir intervalos.")
             return
         res = self._suggest_interval_core(func)
         if res is None:
-            self.log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
+            if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+                self.suggest_log.clear(); self.suggest_log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
             return
         a, b, intervals, zeros = res
         self.a.setValue(a); self.b.setValue(b)
@@ -2229,7 +2400,9 @@ class RootFindingPage(QWidget):
             report.append(""); report.append("Posibles raíces exactas:")
             for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0]))):
                 report.append(f"{idx+1}. {zx:.6f} (paso {step:.1e})")
-        self.log.appendPlainText("\n".join(report))
+        text = "\n".join(report)
+        if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+            self.suggest_log.clear(); self.suggest_log.appendPlainText(text)
 
     def _clear(self):
         self.func.clear()
@@ -2540,11 +2713,13 @@ class RootFindingPage(QWidget):
     def suggest_interval(self):
         func = self.func.text().strip()
         if not func:
-            self.log.appendPlainText("Ingresa una función para sugerir intervalos.")
+            if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+                self.suggest_log.clear(); self.suggest_log.appendPlainText("Ingresa una función para sugerir intervalos.")
             return
         res = self._suggest_interval_core(func)
         if res is None:
-            self.log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
+            if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+                self.suggest_log.clear(); self.suggest_log.appendPlainText("No se encontró cambio de signo en el rango analizado.")
             return
         a, b, intervals, zeros = res
         self.a.setValue(a); self.b.setValue(b)
@@ -2555,7 +2730,9 @@ class RootFindingPage(QWidget):
             report.append(""); report.append("Posibles raíces exactas:")
             for idx, (zx, step) in enumerate(sorted(zeros, key=lambda z: abs(z[0]))):
                 report.append(f"{idx+1}. {zx:.6f} (paso {step:.1e})")
-        self.log.appendPlainText("\n".join(report))
+        text = "\n".join(report)
+        if hasattr(self, 'suggest_log') and self.suggest_log is not None:
+            self.suggest_log.clear(); self.suggest_log.appendPlainText(text)
 
     def _clear(self):
         self.func.clear()
