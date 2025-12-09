@@ -1,8 +1,9 @@
 import sys
 from PySide6 import QtGui
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox, QDialog, QDialogButtonBox, QMenu
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QLabel, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem, QFrame, QHeaderView, QAbstractScrollArea, QScrollArea, QSlider, QSizePolicy, QButtonGroup, QMessageBox, QAbstractSpinBox, QDialog, QDialogButtonBox, QMenu, QRadioButton
 from PySide6.QtCore import Qt
 from fractions import Fraction
+from decimal import Decimal
 import math
 import numpy as np
 import re
@@ -29,14 +30,21 @@ def parse_fraction(text: str) -> Fraction:
         return Fraction(int(num.strip()), int(den.strip()))
     try:
         if s.lower() in ("pi", "π"):
-            return Fraction.from_float(math.pi)
+            # usar aproximación con alta precisión
+            return Fraction(Decimal(str(math.pi)))
         if s.lower() == "e":
-            return Fraction.from_float(math.e)
+            return Fraction(Decimal(str(math.e)))
+        # decimales o notación científica: parsear como Decimal para exactitud
         if any(ch in s for ch in ".eE"):
-            return Fraction.from_float(float(s))
+            d = Decimal(s)
+            return Fraction(d)
         return Fraction(int(s))
     except Exception:
-        return Fraction.from_float(float(s))
+        # intento final con Decimal
+        try:
+            return Fraction(Decimal(s))
+        except Exception:
+            return Fraction.from_float(float(s))
 
 class MatricesPage(QWidget):
     def __init__(self, colors, parent=None):
@@ -708,12 +716,12 @@ class MatricesPage(QWidget):
                 return
             # Operaciones básicas sin expresión
             basic = self.basic_op.currentText()
-            # Si el modo es "Expresión" pero no hay expresión, por defecto mostrar procedimiento de Suma
-            if basic == "Expresión":
-                basic = "Suma"
             adv = self.adv_op.currentText()
             base = matA
-            if basic == "Suma":
+            if expr:
+                # ya manejado arriba
+                pass
+            elif basic == "Suma":
                 res = Matrix([[matA[i, j] for j in range(matA.cols)] for i in range(matA.rows)])
                 for i in range(matA.rows):
                     for j in range(matA.cols):
@@ -810,6 +818,12 @@ class MatricesPage(QWidget):
     def clear_all(self):
         for tbl in (self.tableA, self.tableB):
             tbl.clear(); tbl.setRowCount(0); tbl.setColumnCount(0)
+        # restaurar tamaño por defecto 3x3
+        self.spin_rows.setValue(3)
+        self.spin_colsA.setValue(3)
+        self.spin_rowsB.setValue(3)
+        self.spin_colsB.setValue(3)
+        self.generate_tables()
         self._clear_steps()
 
     def _add_row(self, table: QTableWidget):
@@ -878,17 +892,22 @@ class GaussJordanPage(QWidget):
         controls_top = QHBoxLayout();
         self.spin_rows = QSpinBox(); self.spin_rows.setRange(1, 10); self.spin_rows.setValue(3)
         self.spin_cols = QSpinBox(); self.spin_cols.setRange(1, 10); self.spin_cols.setValue(3)
+        self.spin_bcols = QSpinBox(); self.spin_bcols.setRange(1, 10); self.spin_bcols.setValue(1)
         controls_top.addWidget(QLabel("Ecuaciones:")); controls_top.addWidget(self.spin_rows)
         controls_top.addWidget(QLabel("Variables:")); controls_top.addWidget(self.spin_cols)
+        controls_top.addWidget(QLabel("Vectores:")); controls_top.addWidget(self.spin_bcols)
         controls_top.addStretch(1)
         main.addLayout(controls_top)
 
         actions = QHBoxLayout(); actions.addStretch(1)
         self.btn_generate = QPushButton("Generar matriz aumentada")
-        self.btn_equations = QPushButton("Ingresar ecuaciones…")
-        self.method_combo = QComboBox(); self.method_combo.addItems(["Gauss‑Jordan", "Gauss", "Cramer", "Sarrus"]); self.method_combo.setFixedWidth(180)
+        self.rb_equations = QRadioButton("Ecuaciones")
+        self.rb_vectors = QRadioButton("Vectores")
+        self.rb_equations.setChecked(True)
+        self.btn_equations = QPushButton("Ingresar…")
+        self.method_combo = QComboBox(); self.method_combo.addItems(["Gauss‑Jordan", "Gauss", "Cramer", "Sarrus", "Leontief"]); self.method_combo.setFixedWidth(200)
         self.btn_solve = QPushButton("Resolver"); self.btn_clear = QPushButton("Limpiar")
-        for w in (self.btn_generate, self.btn_equations, self.method_combo, self.btn_solve, self.btn_clear):
+        for w in (self.btn_generate, self.rb_equations, self.rb_vectors, self.btn_equations, self.method_combo, self.btn_solve, self.btn_clear):
             actions.addWidget(w)
         main.addLayout(actions)
 
@@ -900,6 +919,14 @@ class GaussJordanPage(QWidget):
         for c in range(self.table.columnCount()):
             self.table.setColumnWidth(c, 100)
         left_col.addWidget(self.table)
+        self.lbl_b = QLabel("Vector(es) b")
+        self.table_b = QTableWidget(3, 1)
+        self.table_b.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_b.verticalHeader().setVisible(True)
+        self.table_b.setMinimumHeight(120)
+        self.table_b.hide(); self.lbl_b.hide()
+        left_col.addWidget(self.lbl_b)
+        left_col.addWidget(self.table_b)
 
         lbl_det = QLabel("Procedimiento detallado"); lbl_det.setStyleSheet(f"color:{self.colors['text']};")
         self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(280); self.log.setLineWrapMode(QPlainTextEdit.NoWrap)
@@ -943,29 +970,91 @@ class GaussJordanPage(QWidget):
         self.btn_generate.clicked.connect(self.generate_matrix)
         self.btn_solve.clicked.connect(self.solve)
         self.btn_clear.clicked.connect(self.clear)
-        self.btn_equations.clicked.connect(self.open_equations_dialog)
+        self.btn_equations.clicked.connect(self._open_input_mode)
+        self.rb_equations.toggled.connect(lambda _: self._update_tables_mode())
+        self.rb_vectors.toggled.connect(lambda _: self._update_tables_mode())
+        self.method_combo.currentTextChanged.connect(self._on_method_changed)
+        self.spin_rows.valueChanged.connect(lambda _: self.generate_matrix())
+        self.spin_cols.valueChanged.connect(lambda _: self.generate_matrix())
+        self.spin_bcols.valueChanged.connect(lambda _: self.generate_matrix())
         self.setStyleSheet(f"QLabel {{ color:{self.colors['text']}; }} QTableWidget {{ background:{self.colors['matrix_bg']}; color:{self.colors['text']}; }} QPlainTextEdit {{ background:{self.colors['secondary_bg']}; color:{self.colors['text']}; }}")
 
         self.generate_matrix()
 
     def generate_matrix(self):
         rows = self.spin_rows.value(); cols = self.spin_cols.value()
-        self.table.setRowCount(rows); self.table.setColumnCount(cols + 1)
-        for c in range(self.table.columnCount()):
-            self.table.setColumnWidth(c, 100)
-        for r in range(rows):
-            for c in range(cols + 1):
-                self.table.setItem(r, c, QTableWidgetItem("0"))
+        if self.rb_vectors.isChecked():
+            # solo A visible; sin columna b (b implícito 0)
+            self.table.setRowCount(rows); self.table.setColumnCount(cols)
+            for c in range(self.table.columnCount()):
+                self.table.setColumnWidth(c, 100)
+            for r in range(rows):
+                for c in range(cols):
+                    if not self.table.item(r, c):
+                        self.table.setItem(r, c, QTableWidgetItem("0"))
+            self.lbl_b.hide(); self.table_b.hide()
+        elif self.method_combo.currentText() == "Leontief":
+            # A visible y demanda b separada
+            self.table.setRowCount(rows); self.table.setColumnCount(cols)
+            for c in range(self.table.columnCount()):
+                self.table.setColumnWidth(c, 100)
+            for r in range(rows):
+                for c in range(cols):
+                    if not self.table.item(r, c):
+                        self.table.setItem(r, c, QTableWidgetItem("0"))
+            self.table_b.setRowCount(rows); self.table_b.setColumnCount(1)
+            for r in range(rows):
+                if not self.table_b.item(r, 0):
+                    self.table_b.setItem(r, 0, QTableWidgetItem("0"))
+            self.lbl_b.setText("Demanda b")
+            self.lbl_b.show(); self.table_b.show()
+        else:
+            # matriz aumentada [A|b] integrada
+            self.table.setRowCount(rows); self.table.setColumnCount(cols + 1)
+            for c in range(self.table.columnCount()):
+                self.table.setColumnWidth(c, 100)
+            for r in range(rows):
+                for c in range(cols + 1):
+                    if not self.table.item(r, c):
+                        self.table.setItem(r, c, QTableWidgetItem("0"))
+            self.lbl_b.hide(); self.table_b.hide()
         self._set_headers(rows, cols)
 
     def solve(self):
         rows = self.table.rowCount(); cols = self.table.columnCount(); data = []
-        for r in range(rows):
-            row = []
-            for c in range(cols):
-                item = self.table.item(r, c); text = item.text() if item else "0"
-                row.append(parse_fraction(text))
-            data.append(row)
+        # construir matriz aumentada [A|b]
+        if self.method_combo.currentText() == "Leontief":
+            for r in range(rows):
+                row = []
+                for c in range(cols):
+                    item = self.table.item(r, c); text = item.text() if item else "0"
+                    row.append(parse_fraction(text))
+                # demanda b desde panel; si no hay, usar 0
+                bitem = self.table_b.item(r, 0) if self.table_b.isVisible() else None
+                btext = bitem.text() if bitem else "0"
+                row.append(parse_fraction(btext))
+                data.append(row)
+        elif self.rb_vectors.isChecked():
+            for r in range(rows):
+                row = []
+                for c in range(cols):
+                    item = self.table.item(r, c); text = item.text() if item else "0"
+                    row.append(parse_fraction(text))
+                # b implícito 0
+                row.append(Fraction(0))
+                data.append(row)
+        else:
+            # última columna es b dentro de la misma tabla
+            for r in range(rows):
+                row = []
+                for c in range(cols):
+                    item = self.table.item(r, c); text = item.text() if item else "0"
+                    row.append(parse_fraction(text))
+                # b
+                bitem = self.table.item(r, cols)
+                btext = bitem.text() if bitem else "0"
+                row.append(parse_fraction(btext))
+                data.append(row)
         self.log.clear()
         method = self.method_combo.currentText()
         try:
@@ -1110,6 +1199,50 @@ class GaussJordanPage(QWidget):
                 for i, val in enumerate(sol, start=1):
                     self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
                 self._update_result_panel("ÚNICA", list(range(n)), [], "INDEPENDIENTE", sol)
+            elif method == "Leontief":
+                A = [row[:-1] for row in data]; b = [row[-1] for row in data]
+                n = len(A)
+                if any(len(row) != n for row in A):
+                    self.log.appendPlainText("Leontief requiere A cuadrada y b compatible")
+                    self._update_result_panel("N/A", [], [], "DEPENDIENTE", None)
+                    return
+                self.log.appendPlainText("Método de Leontief: x = (I - A)^{-1} b")
+                I_minus_A = [[Fraction(1 if i == j else 0) - A[i][j] for j in range(n)] for i in range(n)]
+                self.log.appendPlainText("Paso 1: I - A")
+                self.log.appendPlainText(self._format_matrix_lines([row + [Fraction(0)] for row in I_minus_A]))
+                sM = sp.Matrix([[sp.Rational(v.numerator, v.denominator) for v in row] for row in I_minus_A])
+                try:
+                    sMinv = sM.inv()
+                except Exception:
+                    self.log.appendPlainText("(I - A) no es invertible")
+                    self._update_result_panel("INDETERMINADO", [], [], "DEPENDIENTE", None)
+                    return
+                self.log.appendPlainText("Paso 2: (I - A)^{-1}")
+                inv_list = []
+                for i in range(n):
+                    row_vals = []
+                    for j in range(n):
+                        sij = sMinv[i, j]
+                        if hasattr(sij, 'is_Rational') and sij.is_Rational:
+                            row_vals.append(Fraction(int(sij.p), int(sij.q)))
+                        else:
+                            row_vals.append(Fraction(Decimal(str(sij))))
+                    inv_list.append(row_vals)
+                self.log.appendPlainText(self._format_matrix_lines([row + [Fraction(0)] for row in inv_list]))
+                # multiplicación exacta con SymPy
+                sB = sp.Matrix([[sp.Rational(v.numerator, v.denominator)] for v in b])
+                sX = sMinv * sB
+                x = []
+                for i in range(n):
+                    val = sX[i, 0]
+                    if hasattr(val, 'is_Rational') and val.is_Rational:
+                        x.append(Fraction(int(val.p), int(val.q)))
+                    else:
+                        x.append(Fraction(Decimal(str(val))))
+                self.log.appendPlainText("Paso 3: x = (I - A)^{-1} b")
+                for i, val in enumerate(x, start=1):
+                    self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
+                self._update_result_panel("ÚNICA", list(range(n)), [], "INDEPENDIENTE", x)
             else:
                 A = [row[:-1] for row in data]; b = [row[-1] for row in data]
                 n = len(A)
@@ -1138,8 +1271,14 @@ class GaussJordanPage(QWidget):
 
     def clear(self):
         self.table.clear(); self.table.setRowCount(0); self.table.setColumnCount(0)
+        if hasattr(self, 'table_b'):
+            self.table_b.clear(); self.table_b.setRowCount(0); self.table_b.setColumnCount(0)
         self.log.clear()
         self._update_result_panel("", [], [], "", None)
+        self.spin_rows.setValue(3); self.spin_cols.setValue(3)
+        if hasattr(self, 'spin_bcols'):
+            self.spin_bcols.setValue(1)
+        self.generate_matrix()
 
     def open_equations_dialog(self):
         dlg = QDialog(self); dlg.setWindowTitle("Introducir ecuaciones")
@@ -1186,6 +1325,60 @@ class GaussJordanPage(QWidget):
                 self._set_headers(rows, cols)
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
+
+    def open_vectors_dialog(self):
+        dlg = QDialog(self); dlg.setWindowTitle("Introducir vector b")
+        lay = QVBoxLayout(dlg)
+        info = QLabel("Introduce componentes separados por comas o líneas. Ej: 1, 2, 3")
+        edit = QPlainTextEdit(); edit.setPlaceholderText("1, 2, 3")
+        lay.addWidget(info); lay.addWidget(edit)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(bb)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        if dlg.exec():
+            text = edit.toPlainText().strip()
+            try:
+                parts = [p.strip() for p in re.split(r"[\n,]+", text) if p.strip()]
+                rows = len(parts)
+                cols = self.spin_cols.value()
+                if rows <= 0 or cols <= 0:
+                    raise ValueError("Dimensiones inválidas")
+                # asegurar longitud de vector y adaptar tabla según modo
+                self.spin_rows.setValue(rows)
+                if self.method_combo.currentText() == "Leontief":
+                    # vector demanda b separado
+                    self.table.setRowCount(rows); self.table.setColumnCount(cols)
+                    self.table_b.setRowCount(rows); self.table_b.setColumnCount(1)
+                    for r in range(rows):
+                        val = parse_fraction(parts[r])
+                        self.table_b.setItem(r, 0, QTableWidgetItem(str(float(val))))
+                    self._set_headers(rows, cols)
+                else:
+                    # en modo vector no se edita b; mantener b=0 implícito
+                    self.table.setRowCount(rows); self.table.setColumnCount(cols)
+                    self._set_headers(rows, cols)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def _open_input_mode(self):
+        if self.rb_equations.isChecked():
+            self.open_equations_dialog()
+        else:
+            self.open_vectors_dialog()
+
+    def _update_tables_mode(self):
+        self.generate_matrix()
+
+    def _on_method_changed(self, name: str):
+        if name == "Leontief":
+            self.rb_vectors.setChecked(True)
+            # limitar a 3 variables y 1 vector
+            self.spin_cols.setRange(3, 3); self.spin_cols.setValue(3)
+            self.spin_bcols.setRange(1, 1); self.spin_bcols.setValue(1)
+        else:
+            self.spin_cols.setRange(1, 10)
+            self.spin_bcols.setRange(1, 10)
+        self.generate_matrix()
 
     def _parse_equations(self, text: str):
         parts = [p.strip() for p in re.split(r"[\n,]+", text) if p.strip()]
@@ -1268,14 +1461,21 @@ class GaussJordanPage(QWidget):
         return A_list
 
     def _set_headers(self, rows: int, cols: int):
-        self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols)), "b"])
+        if self.method_combo.currentText() == "Leontief":
+            self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols))])
+            if hasattr(self, 'table_b'):
+                self.table_b.setHorizontalHeaderLabels(["b"])
+                self.table_b.setVerticalHeaderLabels([str(i+1) for i in range(rows)])
+        elif self.rb_vectors.isChecked():
+            self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols))])
+        else:
+            self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols)), "b"])
         self.table.setVerticalHeaderLabels([str(i+1) for i in range(rows)])
 
     def _fmt_val(self, x) -> str:
         try:
             val = float(x)
-            s = f"{val:.6f}".rstrip('0').rstrip('.')
-            return s if s else "0"
+            return f"{val:.4f}"
         except Exception:
             return str(x)
 
@@ -1285,6 +1485,13 @@ class GaussJordanPage(QWidget):
             left = "  " + "  ".join(f"{self._fmt_val(v):>8}" for v in r[:-1])
             right = self._fmt_val(r[-1])
             rows.append(f"[{left} | {right:>8}]")
+        return "\n".join(rows)
+
+    def _format_matrix_plain(self, mat):
+        rows = []
+        for r in mat:
+            content = "  ".join(f"{self._fmt_val(v):>8}" for v in r)
+            rows.append(f"[{content}]")
         return "\n".join(rows)
 
     def _update_result_panel(self, status, pivot_cols, free_vars, indep, sol):
