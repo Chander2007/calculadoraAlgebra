@@ -989,20 +989,14 @@ class GaussJordanPage(QWidget):
                         self.table.setItem(r, c, QTableWidgetItem("0"))
             self.lbl_b.hide(); self.table_b.hide()
         elif self.method_combo.currentText() == "Leontief":
-            # A visible y demanda b separada
-            self.table.setRowCount(rows); self.table.setColumnCount(cols)
+            self.table.setRowCount(rows); self.table.setColumnCount(cols + 1)
             for c in range(self.table.columnCount()):
                 self.table.setColumnWidth(c, 100)
             for r in range(rows):
-                for c in range(cols):
+                for c in range(cols + 1):
                     if not self.table.item(r, c):
                         self.table.setItem(r, c, QTableWidgetItem("0"))
-            self.table_b.setRowCount(rows); self.table_b.setColumnCount(1)
-            for r in range(rows):
-                if not self.table_b.item(r, 0):
-                    self.table_b.setItem(r, 0, QTableWidgetItem("0"))
-            self.lbl_b.setText("Demanda b")
-            self.lbl_b.show(); self.table_b.show()
+            self.lbl_b.hide(); self.table_b.hide()
         else:
             # matriz aumentada [A|b] integrada
             self.table.setRowCount(rows); self.table.setColumnCount(cols + 1)
@@ -1021,11 +1015,10 @@ class GaussJordanPage(QWidget):
         if self.method_combo.currentText() == "Leontief":
             for r in range(rows):
                 row = []
-                for c in range(cols):
+                for c in range(cols - 1):
                     item = self.table.item(r, c); text = item.text() if item else "0"
                     row.append(parse_fraction(text))
-                # demanda b desde panel; si no hay, usar 0
-                bitem = self.table_b.item(r, 0) if self.table_b.isVisible() else None
+                bitem = self.table.item(r, cols - 1)
                 btext = bitem.text() if bitem else "0"
                 row.append(parse_fraction(btext))
                 data.append(row)
@@ -1213,8 +1206,21 @@ class GaussJordanPage(QWidget):
                     inv_list = self._invert_with_pivot(I_minus_A)
                 except Exception:
                     self.log.appendPlainText("(I - A) no es invertible")
-                    self._update_result_panel("INDETERMINADO", [], [], "DEPENDIENTE", None)
-                    return
+                    # Fallback: solución mínima‑norma con pseudoinversa (Moore‑Penrose)
+                    try:
+                        import numpy as _np
+                        L_np = _np.array([[float(v) for v in row] for row in I_minus_A], dtype=float)
+                        b_np = _np.array([float(v) for v in b], dtype=float)
+                        x_np = _np.linalg.pinv(L_np).dot(b_np)
+                        self.log.appendPlainText("Se aplica pseudoinversa para solución aproximada X")
+                        self.log.appendPlainText(self._format_matrix_plain([[val] for val in x_np]))
+                        self.round2 = True
+                        self._update_result_panel("APROX.", list(range(n)), [], "DEPENDIENTE", list(x_np))
+                        self.round2 = False
+                        return
+                    except Exception:
+                        self._update_result_panel("INDETERMINADO", [], [], "DEPENDIENTE", None)
+                        return
                 self.log.appendPlainText("Matriz Inversa de Leontief L^{-1} = (I - A)^{-1}")
                 self.log.appendPlainText(self._format_matrix_plain(inv_list))
                 self.log.appendPlainText("L^{-1} actúa como matriz de multiplicadores que relaciona directamente D con X")
@@ -1356,14 +1362,8 @@ class GaussJordanPage(QWidget):
         self.generate_matrix()
 
     def _on_method_changed(self, name: str):
-        if name == "Leontief":
-            self.rb_vectors.setChecked(True)
-            # permitir reducir variables; columna b separada debe ser única
-            self.spin_cols.setRange(1, 10)
-            self.spin_bcols.setRange(1, 1); self.spin_bcols.setValue(1)
-        else:
-            self.spin_cols.setRange(1, 10)
-            self.spin_bcols.setRange(1, 10)
+        self.spin_cols.setRange(1, 10)
+        self.spin_bcols.setRange(1, 10)
         self.generate_matrix()
 
     def _parse_equations(self, text: str):
@@ -1448,10 +1448,7 @@ class GaussJordanPage(QWidget):
 
     def _set_headers(self, rows: int, cols: int):
         if self.method_combo.currentText() == "Leontief":
-            self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols))])
-            if hasattr(self, 'table_b'):
-                self.table_b.setHorizontalHeaderLabels(["b"])
-                self.table_b.setVerticalHeaderLabels([str(i+1) for i in range(rows)])
+            self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols)), "b"])
         elif self.rb_vectors.isChecked():
             self.table.setHorizontalHeaderLabels([*(f"x{i+1}" for i in range(cols))])
         else:
