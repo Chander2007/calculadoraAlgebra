@@ -150,7 +150,7 @@ class MatricesPage(QWidget):
         # Operaciones: barra superior (crear antes de usar en toolbar)
         self.basic_op = QComboBox(); self.basic_op.addItems(["Expresión", "Suma", "Resta", "Multiplicación", "Escalar"])
         self.basic_op.setFixedWidth(160); self.basic_op.setCursor(Qt.PointingHandCursor); self.basic_op.setStyleSheet(combo_style)
-        self.adv_op = QComboBox(); self.adv_op.addItems(["Ninguna", "Transpuesta", "Inversa", "Diagonal Superior", "Diagonal Inferior", "Determinante", "Cofactor", "Independencia lineal", "Sistema de ecuaciones"])
+        self.adv_op = QComboBox(); self.adv_op.addItems(["Ninguna", "Transpuesta", "Inversa", "Diagonal Superior", "Diagonal Inferior", "Determinante", "Cofactor", "Ecuaciones matriciales"])
         self.adv_op.setFixedWidth(170); self.adv_op.setCursor(Qt.PointingHandCursor); self.adv_op.setStyleSheet(combo_style)
         self.adv_target = 'A'
         self.btn_target = QPushButton("Operar sobre: A")
@@ -388,7 +388,7 @@ class MatricesPage(QWidget):
             self.containerB.setVisible(True)
 
     def _update_adv_target_enabled(self):
-        self.btn_target.setEnabled(self.adv_op.currentText() != "Sistema de ecuaciones")
+        self.btn_target.setEnabled(self.adv_op.currentText() != "Ecuaciones matriciales")
         self.btn_target.setVisible(self.adv_op.currentText() != "Ninguna")
 
     def _set_adv_target(self, t):
@@ -798,18 +798,12 @@ class MatricesPage(QWidget):
                 base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
                 res, _logs = operations_cofactor.cofactor_matrix(base2)
                 self._add_step_panel(f"Paso {self._next_step}", f"Matriz de cofactores de {self.adv_target}", res); self._next_step += 1
-            elif adv == "Independencia lineal":
-                base2 = matA if self.adv_target == 'A' else matB if self.adv_target == 'B' else self._mul(matA, matB)
-                indep, rank, cols = self._linear_independence(base2)
-                msg = f"Rango({self.adv_target}) = {rank}; columnas = {cols} → " + ("independientes" if indep else "dependientes")
-                self._add_step_panel(f"Paso {self._next_step}", msg, base2); self._next_step += 1
-            elif adv == "Sistema de ecuaciones":
+            elif adv == "Ecuaciones matriciales":
                 rref, sol = self._system_solve(matA, matB)
-                # Mostrar RREF del aumentado y solución si disponible
                 m_rref = Matrix([[Fraction(int(rref[i,j].p), int(rref[i,j].q)) if getattr(rref[i,j],'is_Rational',False) else Fraction.from_float(float(rref[i,j])) for j in range(rref.cols)] for i in range(rref.rows)])
                 self._add_step_panel(f"Paso {self._next_step}", "RREF del aumentado [A|B]", m_rref); self._next_step += 1
                 if sol is not None:
-                    self._add_step_panel(f"Paso {self._next_step}", "Solución única", sol); self._next_step += 1
+                    self._add_step_panel(f"Paso {self._next_step}", "X = A^{-1}·B (solución)", sol); self._next_step += 1
             self._set_final(res)
             self.inner_tabs.setCurrentIndex(1)
         except Exception as e:
@@ -980,6 +974,7 @@ class GaussJordanPage(QWidget):
         self.setStyleSheet(f"QLabel {{ color:{self.colors['text']}; }} QTableWidget {{ background:{self.colors['matrix_bg']}; color:{self.colors['text']}; }} QPlainTextEdit {{ background:{self.colors['secondary_bg']}; color:{self.colors['text']}; }}")
 
         self.generate_matrix()
+        self.round2 = False
 
     def generate_matrix(self):
         rows = self.spin_rows.value(); cols = self.spin_cols.value()
@@ -1047,11 +1042,11 @@ class GaussJordanPage(QWidget):
             # última columna es b dentro de la misma tabla
             for r in range(rows):
                 row = []
-                for c in range(cols):
+                for c in range(cols - 1):
                     item = self.table.item(r, c); text = item.text() if item else "0"
                     row.append(parse_fraction(text))
                 # b
-                bitem = self.table.item(r, cols)
+                bitem = self.table.item(r, cols - 1)
                 btext = bitem.text() if bitem else "0"
                 row.append(parse_fraction(btext))
                 data.append(row)
@@ -1206,43 +1201,34 @@ class GaussJordanPage(QWidget):
                     self.log.appendPlainText("Leontief requiere A cuadrada y b compatible")
                     self._update_result_panel("N/A", [], [], "DEPENDIENTE", None)
                     return
-                self.log.appendPlainText("Método de Leontief: x = (I - A)^{-1} b")
+                self.log.appendPlainText("Modelo de Leontief — Objetivo: calcular producción total X que satisface la demanda intermedia y final D")
+                self.log.appendPlainText("Relación: X = (I - A)^{-1} D")
+                self.log.appendPlainText("")
+                self.log.appendPlainText("Matriz de Coeficientes Técnicos A")
+                self.log.appendPlainText(self._format_matrix_plain(A))
                 I_minus_A = [[Fraction(1 if i == j else 0) - A[i][j] for j in range(n)] for i in range(n)]
-                self.log.appendPlainText("Paso 1: I - A")
-                self.log.appendPlainText(self._format_matrix_lines([row + [Fraction(0)] for row in I_minus_A]))
-                sM = sp.Matrix([[sp.Rational(v.numerator, v.denominator) for v in row] for row in I_minus_A])
+                self.log.appendPlainText("Matriz de Leontief L = I - A")
+                self.log.appendPlainText(self._format_matrix_plain(I_minus_A))
                 try:
-                    sMinv = sM.inv()
+                    inv_list = self._invert_with_pivot(I_minus_A)
                 except Exception:
                     self.log.appendPlainText("(I - A) no es invertible")
                     self._update_result_panel("INDETERMINADO", [], [], "DEPENDIENTE", None)
                     return
-                self.log.appendPlainText("Paso 2: (I - A)^{-1}")
-                inv_list = []
-                for i in range(n):
-                    row_vals = []
-                    for j in range(n):
-                        sij = sMinv[i, j]
-                        if hasattr(sij, 'is_Rational') and sij.is_Rational:
-                            row_vals.append(Fraction(int(sij.p), int(sij.q)))
-                        else:
-                            row_vals.append(Fraction(Decimal(str(sij))))
-                    inv_list.append(row_vals)
-                self.log.appendPlainText(self._format_matrix_lines([row + [Fraction(0)] for row in inv_list]))
-                # multiplicación exacta con SymPy
-                sB = sp.Matrix([[sp.Rational(v.numerator, v.denominator)] for v in b])
-                sX = sMinv * sB
-                x = []
-                for i in range(n):
-                    val = sX[i, 0]
-                    if hasattr(val, 'is_Rational') and val.is_Rational:
-                        x.append(Fraction(int(val.p), int(val.q)))
-                    else:
-                        x.append(Fraction(Decimal(str(val))))
-                self.log.appendPlainText("Paso 3: x = (I - A)^{-1} b")
+                self.log.appendPlainText("Matriz Inversa de Leontief L^{-1} = (I - A)^{-1}")
+                self.log.appendPlainText(self._format_matrix_plain(inv_list))
+                self.log.appendPlainText("L^{-1} actúa como matriz de multiplicadores que relaciona directamente D con X")
+                self.log.appendPlainText("")
+                self.log.appendPlainText("Demanda final D")
+                self.log.appendPlainText(self._format_matrix_plain([[v] for v in b]))
+                x = self._mul_mat_vec(inv_list, b)
+                self.log.appendPlainText("Producción total X = L^{-1} D")
+                self.log.appendPlainText(self._format_matrix_plain([[v] for v in x]))
                 for i, val in enumerate(x, start=1):
-                    self.log.appendPlainText(f"x{i} = {self._fmt_val(val)}")
+                    self.log.appendPlainText(f"x{i} = {float(val):.2f}")
+                self.round2 = True
                 self._update_result_panel("ÚNICA", list(range(n)), [], "INDEPENDIENTE", x)
+                self.round2 = False
             else:
                 A = [row[:-1] for row in data]; b = [row[-1] for row in data]
                 n = len(A)
@@ -1372,8 +1358,8 @@ class GaussJordanPage(QWidget):
     def _on_method_changed(self, name: str):
         if name == "Leontief":
             self.rb_vectors.setChecked(True)
-            # limitar a 3 variables y 1 vector
-            self.spin_cols.setRange(3, 3); self.spin_cols.setValue(3)
+            # permitir reducir variables; columna b separada debe ser única
+            self.spin_cols.setRange(1, 10)
             self.spin_bcols.setRange(1, 1); self.spin_bcols.setValue(1)
         else:
             self.spin_cols.setRange(1, 10)
@@ -1475,6 +1461,8 @@ class GaussJordanPage(QWidget):
     def _fmt_val(self, x) -> str:
         try:
             val = float(x)
+            if getattr(self, 'round2', False):
+                return f"{val:.2f}"
             return f"{val:.4f}"
         except Exception:
             return str(x)
@@ -1494,6 +1482,42 @@ class GaussJordanPage(QWidget):
             rows.append(f"[{content}]")
         return "\n".join(rows)
 
+    def _invert_with_pivot(self, M):
+        n = len(M)
+        I = [[Fraction(1 if i == j else 0) for j in range(n)] for i in range(n)]
+        A = [row[:] for row in M]
+        B = [row[:] for row in I]
+        for k in range(n):
+            piv_row = max(range(k, n), key=lambda r: abs(A[r][k]))
+            if A[piv_row][k] == 0:
+                raise ValueError("Matriz singular")
+            if piv_row != k:
+                A[k], A[piv_row] = A[piv_row], A[k]
+                B[k], B[piv_row] = B[piv_row], B[k]
+            piv = A[k][k]
+            for j in range(n):
+                A[k][j] = A[k][j] / piv
+                B[k][j] = B[k][j] / piv
+            for i in range(n):
+                if i == k:
+                    continue
+                factor = A[i][k]
+                if factor != 0:
+                    for j in range(n):
+                        A[i][j] -= factor * A[k][j]
+                        B[i][j] -= factor * B[k][j]
+        return B
+
+    def _mul_mat_vec(self, M, v):
+        n = len(M)
+        res = []
+        for i in range(n):
+            s = Fraction(0)
+            for j in range(n):
+                s += M[i][j] * v[j]
+            res.append(s)
+        return res
+
     def _update_result_panel(self, status, pivot_cols, free_vars, indep, sol):
         self.res_status.setText(f"Estado: {status}" if status else "Estado: —")
         piv_txt = ", ".join(str(p+1) for p in pivot_cols) if pivot_cols else "—"
@@ -1501,9 +1525,16 @@ class GaussJordanPage(QWidget):
         free_txt = ", ".join(f"x{v}" for v in free_vars) if free_vars else "—"
         self.res_free.setText(f"Variables libres: {free_txt}")
         self.res_indep.setText(f"Columnas de A: {indep}" if indep else "Columnas de A: —")
-        n_vars = max(0, (self.table.columnCount() - 1))
+        # determinar número de variables sin contar la columna b (término independiente)
+        try:
+            n_vars = int(self.spin_cols.value())
+        except Exception:
+            n_vars = max(0, (self.table.columnCount() - 1))
+        # si la solución trae más valores, ajustamos para mostrarlos todos
         if sol:
             n_vars = max(n_vars, len(sol))
+        # nunca crear filas por encima del número de variables debido a free_vars
+        free_vars = [v for v in free_vars if v <= n_vars]
         self.res_vars.setRowCount(n_vars)
         for i in range(n_vars):
             self.res_vars.setItem(i, 0, QTableWidgetItem(f"x{i+1}"))
