@@ -178,6 +178,9 @@ class MatricesPage(QWidget):
         toolbar.addWidget(lbl_operation, 1, 0)
         self.expr_input.setFixedWidth(200)
         toolbar.addWidget(self.expr_input, 1, 1)
+        self.btn_ax = QPushButton("Ingresar A·x")
+        self.btn_ax.setCursor(Qt.PointingHandCursor)
+        toolbar.addWidget(self.btn_ax, 1, 4)
         lbl_view = QLabel("Vista:"); lbl_view.setStyleSheet(f"color:{self.colors['text_secondary']}; font-weight:600;")
         toolbar.addWidget(lbl_view, 1, 2)
         toolbar.addWidget(self.view_mode, 1, 3)
@@ -201,6 +204,7 @@ class MatricesPage(QWidget):
         self.btn_solve.clicked.connect(self.solve_expression)
         self.adv_op.currentTextChanged.connect(lambda _: self._update_adv_target_enabled())
         self._update_adv_target_enabled()
+        self.btn_ax.clicked.connect(self.open_ax_dialog)
 
         self.spin_rows.valueChanged.connect(lambda _: self.generate_tables())
         self.spin_colsA.valueChanged.connect(lambda _: self.generate_tables())
@@ -418,6 +422,66 @@ class MatricesPage(QWidget):
             self.spin_colsB.setValue(s_colsB.value())
             self.generate_tables()
 
+    def open_ax_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Ingresar A y x")
+        lay = QVBoxLayout(dlg)
+        a_edit = QLineEdit()
+        x_edit = QLineEdit()
+        a_edit.setPlaceholderText("[1,2,3;4,5,6]")
+        x_edit.setPlaceholderText("[7,8,9]")
+        lay.addWidget(QLabel("Matriz A"))
+        lay.addWidget(a_edit)
+        lay.addWidget(QLabel("Vector x"))
+        lay.addWidget(x_edit)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        lay.addWidget(bb)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        if dlg.exec():
+            sA = a_edit.text().strip()
+            sx = x_edit.text().strip()
+            def parse_mat(s):
+                rows = []
+                t = s.strip()
+                if t.startswith("[") and t.endswith("]"):
+                    t = t[1:-1]
+                for row in re.split(r";", t):
+                    row = row.strip()
+                    if not row:
+                        continue
+                    vals = [parse_fraction(x.strip()) for x in re.split(r",", row) if x.strip()]
+                    rows.append(vals)
+                return rows
+            def parse_vec(s):
+                t = s.strip()
+                if t.startswith("[") and t.endswith("]"):
+                    t = t[1:-1]
+                vals = [parse_fraction(x.strip()) for x in re.split(r",", t) if x.strip()]
+                return [[v] for v in vals]
+            try:
+                Arows = parse_mat(sA)
+                xrows = parse_vec(sx)
+                rA = len(Arows); cA = len(Arows[0]) if rA else 0
+                rx = len(xrows)
+                if cA != rx:
+                    raise ValueError("Dimensiones no compatibles: columnas de A deben igualar tamaño de x")
+                self.spin_rows.setValue(rA)
+                self.spin_colsA.setValue(cA)
+                self.spin_rowsB.setValue(rx)
+                self.spin_colsB.setValue(1)
+                self.build_body(self.view_mode.currentText() == "Apilada")
+                self.tableA.setRowCount(rA); self.tableA.setColumnCount(cA)
+                self.tableB.setRowCount(rx); self.tableB.setColumnCount(1)
+                for i in range(rA):
+                    for j in range(cA):
+                        self.tableA.setItem(i, j, QTableWidgetItem(str(float(Arows[i][j]))))
+                for i in range(rx):
+                    self.tableB.setItem(i, 0, QTableWidgetItem(str(float(xrows[i][0]))))
+                self.basic_op.setCurrentText("Multiplicación")
+                self.solve_expression()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
     def _matrix_scale(self, mat: Matrix, k: Fraction) -> Matrix:
         rows, cols = mat.shape
         out = [[mat[i, j] * k for j in range(cols)] for i in range(rows)]
@@ -595,10 +659,14 @@ class MatricesPage(QWidget):
         i = 0
         while i < len(t):
             ch = t[i]
-            if ch in '+-*':
+            if ch in '+-*()':
                 tokens.append(ch); i += 1; continue
-            if ch in 'AB':
-                tokens.append(ch); i += 1; continue
+            if ch in 'ABxX':
+                tokens.append('B' if ch in 'xX' else ch); i += 1; continue
+            if ch == '^':
+                if i + 1 < len(t) and t[i+1] in 'Tt':
+                    tokens.append('^T'); i += 2; continue
+                raise ValueError("Se esperaba ^T")
             # número (entero/frac/decimal)
             j = i
             while j < len(t) and (t[j].isdigit() or t[j] in '/.'): j += 1
@@ -611,14 +679,44 @@ class MatricesPage(QWidget):
         self._clear_steps()
         def clone_zero(rows, cols):
             return Matrix([[Fraction(0) for _ in range(cols)] for _ in range(rows)])
+        def apply_transpose(mat):
+            res = self._transpose(mat)
+            self._add_step_panel(f"Paso {self._next_step}", "Transponer", res); 
+            self._next_step += 1
+            return res
         def read_factor(idx):
             coef = Fraction(1)
             var = None
-            # opcional coeficiente
-            if idx < len(tokens) and (tokens[idx][0].isdigit()):
+            if idx < len(tokens) and (tokens[idx] and tokens[idx][0].isdigit()):
                 coef = parse_fraction(tokens[idx]); idx += 1
-            if idx >= len(tokens) or tokens[idx] not in ('A','B'):
-                raise ValueError("Se esperaba A o B")
+            if idx >= len(tokens):
+                raise ValueError("Expresión incompleta")
+            if tokens[idx] == '(':
+                idx += 1
+                mat, idx = read_sum(idx)
+                if idx >= len(tokens) or tokens[idx] != ')':
+                    raise ValueError("Paréntesis no balanceados")
+                idx += 1
+                # aplicar coeficiente si corresponde
+                if coef != 1:
+                    rows, cols = mat.shape
+                    partial = Matrix([[mat[i, j] for j in range(cols)] for i in range(rows)])
+                    for i in range(rows):
+                        for j in range(cols):
+                            old = partial[i, j]
+                            new = mat[i, j] * coef
+                            partial[i, j] = new
+                            self._add_step_panel(
+                                f"Paso {self._next_step}",
+                                f"c[{i+1},{j+1}] = ({self._fmt(mat[i,j])}) · {self._fmt(coef)} = {self._fmt(new)}",
+                                partial
+                            ); self._next_step += 1
+                    mat = partial
+                while idx < len(tokens) and tokens[idx] == '^T':
+                    mat = apply_transpose(mat); idx += 1
+                return mat, idx
+            if tokens[idx] not in ('A','B'):
+                raise ValueError("Se esperaba A, B o ( ... )")
             var = tokens[idx]; idx += 1
             base = A if var == 'A' else B
             rows, cols = base.shape
@@ -633,12 +731,16 @@ class MatricesPage(QWidget):
                         f"c[{i+1},{j+1}] = ({var})[{i+1},{j+1}] · {self._fmt(coef)} = {self._fmt(new)}",
                         partial
                     ); self._next_step += 1
-            scaled = partial
-            return scaled, idx
+            while idx < len(tokens) and tokens[idx] == '^T':
+                partial = apply_transpose(partial); idx += 1
+            return partial, idx
         def read_term(idx):
             mat, idx = read_factor(idx)
-            while idx < len(tokens) and tokens[idx] == '*':
-                idx += 1
+            def starts_factor(tk):
+                return tk in ('A','B','(') or (tk and tk[0].isdigit())
+            while idx < len(tokens) and (tokens[idx] == '*' or starts_factor(tokens[idx])):
+                if tokens[idx] == '*':
+                    idx += 1
                 right, idx = read_factor(idx)
                 rowsA, colsA = mat.shape; rowsB, colsB = right.shape
                 if colsA != rowsB:
@@ -660,45 +762,49 @@ class MatricesPage(QWidget):
                         ); self._next_step += 1
                 mat = res
             return mat, idx
+        def read_sum(idx):
+            result = None
+            sign = 1
+            while idx < len(tokens) and tokens[idx] != ')':
+                if tokens[idx] == '+':
+                    sign = 1; idx += 1; continue
+                if tokens[idx] == '-':
+                    sign = -1; idx += 1; continue
+                term, idx = read_term(idx)
+                if sign == -1:
+                    rows, cols = term.shape
+                    for r in range(rows):
+                        for c in range(cols):
+                            old = term[r, c]
+                            new = old * Fraction(-1)
+                            term[r, c] = new
+                            self._add_step_panel(
+                                f"Paso {self._next_step}",
+                                f"c[{r+1},{c+1}] = (−1)×{self._fmt(old)} = {self._fmt(new)}",
+                                term
+                            ); self._next_step += 1
+                prev = result
+                result = term if result is None else self._matrix_add(result, term)
+                if prev is not None:
+                    rows, cols = result.shape
+                    for r in range(rows):
+                        for c in range(cols):
+                            old = prev[r, c]
+                            add = term[r, c]
+                            val = old + add
+                            prev[r, c] = val
+                            self._add_step_panel(
+                                f"Paso {self._next_step}",
+                                f"acum[{r+1},{c+1}] = {self._fmt(old)} + {self._fmt(add)} = {self._fmt(val)}",
+                                prev
+                            ); self._next_step += 1
+                    result = prev
+            return result, idx
         # suma/resta con prioridad
-        i = 0
-        result = None
-        sign = 1
-        while i < len(tokens):
-            if tokens[i] == '+':
-                sign = 1; i += 1; continue
-            if tokens[i] == '-':
-                sign = -1; i += 1; continue
-            term, i = read_term(i)
-            if sign == -1:
-                rows, cols = term.shape
-                for r in range(rows):
-                    for c in range(cols):
-                        old = term[r, c]
-                        new = old * Fraction(-1)
-                        term[r, c] = new
-                        self._add_step_panel(
-                            f"Paso {self._next_step}",
-                            f"c[{r+1},{c+1}] = (−1)×{self._fmt(old)} = {self._fmt(new)}",
-                            term
-                        ); self._next_step += 1
-            prev = result
-            result = term if result is None else self._matrix_add(result, term)
-            if prev is not None:
-                rows, cols = result.shape
-                for r in range(rows):
-                    for c in range(cols):
-                        old = prev[r, c]
-                        add = term[r, c]
-                        val = old + add
-                        prev[r, c] = val
-                        self._add_step_panel(
-                            f"Paso {self._next_step}",
-                            f"acum[{r+1},{c+1}] = {self._fmt(old)} + {self._fmt(add)} = {self._fmt(val)}",
-                            prev
-                        ); self._next_step += 1
-                result = prev
-        return result
+        res, pos = read_sum(0)
+        if pos != len(tokens):
+            raise ValueError("Expresión inválida")
+        return res
 
     def solve_expression(self):
         try:
